@@ -39,31 +39,37 @@ public class PrivateMessageListener implements Listener {
         
         String senderName = event.getSender().getName();
         
-        if (senderName.equalsIgnoreCase(owner)) {
-            String message = event.getMessage();
-            logger.info("Received private message from owner {}: {}", senderName, message);
-            
-            // 使用托管的线程池执行任务
-            if (XinAgentPlugin.Instance.executorService != null && !XinAgentPlugin.Instance.executorService.isShutdown()) {
-                XinAgentPlugin.Instance.executorService.submit(() -> {
-                    try {
-                        if (XinAgentPlugin.Instance.agentManager != null) {
-                            String response = XinAgentPlugin.Instance.agentManager.processMessage(message);
-                            logger.info("AI reply to owner: {}", response);
-                            
-                            String[] lines = response.split("\\r?\\n");
-                            for (String line : lines) {
-                                if (!line.trim().isEmpty()) {
-                                    sendInChunks(senderName, line.trim());
-                                }
-                            }
-                        }
-                    } catch (Exception e) {
-                        logger.error("Error processing private message from owner", e);
-                    }
-                });
-            }
+        if (!senderName.equalsIgnoreCase(owner)) {
+            return;
         }
+
+        String message = event.getMessage();
+        logger.info("Received private message from owner {}: {}", senderName, message);
+        
+        // 使用托管的线程池执行任务
+        if (XinAgentPlugin.Instance.executorService == null || XinAgentPlugin.Instance.executorService.isShutdown()) {
+            return;
+        }
+
+        XinAgentPlugin.Instance.executorService.submit(() -> {
+            try {
+                if (XinAgentPlugin.Instance.agentManager == null) {
+                    return;
+                }
+                
+                String response = XinAgentPlugin.Instance.agentManager.processMessage(message);
+                logger.info("AI reply to owner: {}", response);
+                
+                String[] lines = response.split("\\r?\\n");
+                for (String line : lines) {
+                    if (!line.trim().isEmpty()) {
+                        sendInChunks(senderName, line.trim());
+                    }
+                }
+            } catch (Exception e) {
+                logger.error("Error processing private message from owner", e);
+            }
+        });
     }
 
     private void sendInChunks(String recipient, String text) {

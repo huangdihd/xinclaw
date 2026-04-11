@@ -76,15 +76,17 @@ public class XinAgentPlugin implements Plugin {
     @Override
     public void onDisable() {
         logger.info("Disabling XinAgentPlugin.");
-        if (executorService != null) {
-            executorService.shutdown();
-            try {
-                if (!executorService.awaitTermination(2, TimeUnit.SECONDS)) {
-                    executorService.shutdownNow();
-                }
-            } catch (InterruptedException e) {
+        if (executorService == null) {
+            return;
+        }
+        
+        executorService.shutdown();
+        try {
+            if (!executorService.awaitTermination(2, TimeUnit.SECONDS)) {
                 executorService.shutdownNow();
             }
+        } catch (InterruptedException e) {
+            executorService.shutdownNow();
         }
     }
 

@@ -55,23 +55,25 @@ public class AgentCommandExecutor extends CommandExecutor {
         logger.info("Sending to agent: {}", message);
         
         // 使用托管的线程池执行任务
-        if (XinAgentPlugin.Instance.executorService != null && !XinAgentPlugin.Instance.executorService.isShutdown()) {
-            XinAgentPlugin.Instance.executorService.submit(() -> {
-                try {
-                    String response = XinAgentPlugin.Instance.agentManager.processMessage(message);
-                    logger.info("Agent reply: {}", response);
-                    
-                    String[] lines = response.split("\\n");
-                    for (String line : lines) {
-                        if (!line.trim().isEmpty()) {
-                            sendInChunks(line.trim());
-                        }
-                    }
-                } catch (Exception e) {
-                    logger.error("Error while chatting with agent", e);
-                }
-            });
+        if (XinAgentPlugin.Instance.executorService == null || XinAgentPlugin.Instance.executorService.isShutdown()) {
+            return;
         }
+
+        XinAgentPlugin.Instance.executorService.submit(() -> {
+            try {
+                String response = XinAgentPlugin.Instance.agentManager.processMessage(message);
+                logger.info("Agent reply: {}", response);
+                
+                String[] lines = response.split("\\n");
+                for (String line : lines) {
+                    if (!line.trim().isEmpty()) {
+                        sendInChunks(line.trim());
+                    }
+                }
+            } catch (Exception e) {
+                logger.error("Error while chatting with agent", e);
+            }
+        });
     }
 
     @Override

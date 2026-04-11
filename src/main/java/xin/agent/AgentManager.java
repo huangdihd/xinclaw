@@ -95,16 +95,18 @@ public class AgentManager {
     }
 
     public void clearMemory() {
-        if (this.agent != null) {
-            String pluginDir = xin.bbtt.mcbot.Bot.Instance.getConfig().getConfigData().getPlugin().getDirectory();
-            String configDir = pluginDir + java.io.File.separator + "XinAgent";
-            PersistentChatMemoryStore store = new PersistentChatMemoryStore(configDir);
-            
-            // In LangChain4j, memory is stored per ChatMemory instance which defaults to the memoryId "default"
-            store.deleteMessages("default");
-            
-            // Re-initialize to ensure the proxy grabs the freshly cleared memory
-            initAgent(); 
+        if (this.agent == null) {
+            return;
         }
+        
+        String pluginDir = xin.bbtt.mcbot.Bot.Instance.getConfig().getConfigData().getPlugin().getDirectory();
+        String configDir = pluginDir + java.io.File.separator + "XinAgent";
+        PersistentChatMemoryStore store = new PersistentChatMemoryStore(configDir);
+        
+        // In LangChain4j, memory is stored per ChatMemory instance which defaults to the memoryId "default"
+        store.deleteMessages("default");
+        
+        // Re-initialize to ensure the proxy grabs the freshly cleared memory
+        initAgent(); 
     }
 }
