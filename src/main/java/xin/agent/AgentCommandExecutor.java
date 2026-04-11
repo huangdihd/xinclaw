@@ -1,0 +1,79 @@
+package xin.agent;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import xin.bbtt.mcbot.command.Command;
+import xin.bbtt.mcbot.command.CommandExecutor;
+import xin.bbtt.mcbot.Bot;
+
+public class AgentCommandExecutor extends CommandExecutor {
+
+    private static final Logger logger = LoggerFactory.getLogger(AgentCommandExecutor.class);
+
+    @Override
+    public void onCommand(Command command, String label, String[] args) {
+        if (args.length == 0) {
+            return;
+        }
+
+        if (XinAgentPlugin.Instance == null || XinAgentPlugin.Instance.agentManager == null) {
+            logger.error("AgentManager 未成功初始化！请检查开服/加载插件时的报错信息。");
+            return;
+        }
+
+        if (args.length == 1 && args[0].equalsIgnoreCase("clear")) {
+            XinAgentPlugin.Instance.agentManager.clearMemory();
+            logger.info("Agent memory cleared by command.");
+            Bot.Instance.sendChatMessage("AI 记忆已成功清除。");
+            return;
+        }
+
+        String message = String.join(" ", args);
+        logger.info("Sending to agent: {}", message);
+        
+        // 使用托管的线程池执行任务
+        if (XinAgentPlugin.Instance.executorService != null && !XinAgentPlugin.Instance.executorService.isShutdown()) {
+            XinAgentPlugin.Instance.executorService.submit(() -> {
+                try {
+                    String response = XinAgentPlugin.Instance.agentManager.processMessage(message);
+                    logger.info("Agent reply: {}", response);
+                    
+                    String[] lines = response.split("\\n");
+                    for (String line : lines) {
+                        if (!line.trim().isEmpty()) {
+                            sendInChunks(line.trim());
+                        }
+                    }
+                } catch (Exception e) {
+                    logger.error("Error while chatting with agent", e);
+                }
+            });
+        }
+    }
+
+    private void sendInChunks(String text) {
+        int byteLimit = 90; // Strictly under 100 bytes
+        StringBuilder currentChunk = new StringBuilder();
+        int currentBytes = 0;
+
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            int charBytes = String.valueOf(c).getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
+
+            if (currentBytes + charBytes > byteLimit) {
+                // 原本是 Bot.Instance.sendChatMessage(currentChunk.toString());
+                // 现在改为只在控制台输出
+                logger.info("[AI Reply] {}", currentChunk.toString());
+                currentChunk = new StringBuilder();
+                currentBytes = 0;
+            }
+
+            currentChunk.append(c);
+            currentBytes += charBytes;
+        }
+
+        if (currentChunk.length() > 0) {
+            logger.info("[AI Reply] {}", currentChunk.toString());
+        }
+    }
+}

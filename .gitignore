@@ -1,0 +1,11 @@
+target/
+*.class
+.idea/
+*.iml
+.vscode/
+bin/
+plugin/
+data/
+*.log
+config.properties
+chat-memory.json
