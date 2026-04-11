@@ -73,7 +73,14 @@ public class AgentManager {
         this.agent = AiServices.builder(BotAgent.class)
                 .chatLanguageModel(model)
                 .chatMemory(chatMemory)
-                .tools(new MovementSyncAgentTools())
+                .tools(
+                    new xin.agent.tools.MovementTools(),
+                    new xin.agent.tools.PerceptionTools(),
+                    new xin.agent.tools.SystemTools(),
+                    new xin.agent.tools.SocialTools(),
+                    new xin.agent.tools.InventoryTools(),
+                    new xin.agent.tools.MemoryTools()
+                )
                 .build();
     }
 
