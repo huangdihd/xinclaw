@@ -60,4 +60,4 @@ enable_thinking=false
 
 ## 📄 开源协议
 
-本项目采用 MIT 协议开源。
+本项目采用 **GPLv3 or later** 协议开源。详情请参阅 [LICENSE](LICENSE) 文件。
