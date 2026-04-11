@@ -118,6 +118,74 @@ public class PerceptionTools {
         return result.toString();
     }
 
+    @Tool("获取机器人周围指定半径内特定方块（根据名称模糊匹配）的具体坐标位置。用于寻找特定的方块，如'工作台'、'钻石矿'等。")
+    public String findSpecificBlocks(
+            @P("要查找的方块名称(英文或ID的一部分，如'diamond', 'crafting', 'log')") String blockNameQuery,
+            @P("搜索半径(方块距离，建议10-30)") double radius) {
+        logger.info("[AI Tool Call] 调用了 findSpecificBlocks(query='{}', radius={})", blockNameQuery, radius);
+        
+        if (MovementSync.Instance == null || MovementSync.Instance.getWorld() == null) {
+            return "无法获取世界信息。";
+        }
+
+        Vector3d center = MovementSync.Instance.position.get();
+        if (center == null) return "无法获取当前坐标。";
+
+        int r = (int) Math.ceil(radius);
+        int minX = (int) center.x - r;
+        int maxX = (int) center.x + r;
+        int minY = (int) center.y - r;
+        int maxY = (int) center.y + r;
+        int minZ = (int) center.z - r;
+        int maxZ = (int) center.z + r;
+
+        int totalBlocks = (maxX - minX + 1) * (maxY - minY + 1) * (maxZ - minZ + 1);
+        if (totalBlocks > 64000) { // 限制最大搜索体积 (约40x40x40)
+            return "查询半径过大，请缩小搜索半径（建议30以内）。";
+        }
+
+        String lowerQuery = blockNameQuery.toLowerCase();
+        java.util.List<String> foundPositions = new java.util.ArrayList<>();
+        String foundBlockName = null;
+
+        for (int x = minX; x <= maxX; x++) {
+            for (int y = minY; y <= maxY; y++) {
+                for (int z = minZ; z <= maxZ; z++) {
+                    // 球形半径检查
+                    if (center.distance(new Vector3d(x, y, z)) > radius) continue;
+                    
+                    int blockStateId = MovementSync.Instance.getWorld().getBlockAt(new Vector3d(x, y, z));
+                    String blockName = String.valueOf(BlockStateParser.Instance.parseStateId(blockStateId));
+                    
+                    if (blockName.toLowerCase().contains(lowerQuery) && !blockName.toLowerCase().contains("air")) {
+                        if (foundBlockName == null) foundBlockName = blockName; // 记录第一个匹配到的完整名称
+                        foundPositions.add(String.format("(%d,%d,%d)", x, y, z));
+                        if (foundPositions.size() >= 50) {
+                            break; // 找到50个就够了，防止Token溢出
+                        }
+                    }
+                }
+                if (foundPositions.size() >= 50) break;
+            }
+            if (foundPositions.size() >= 50) break;
+        }
+        
+        if (foundPositions.isEmpty()) {
+            return String.format("在半径 %.1f 内没有找到匹配 '%s' 的方块。", radius, blockNameQuery);
+        }
+        
+        StringBuilder result = new StringBuilder();
+        result.append(String.format("在半径 %.1f 内找到了匹配 '%s' 的方块 (例如: %s)，共 %d 个:\n", 
+                radius, blockNameQuery, foundBlockName, foundPositions.size()));
+        
+        result.append(String.join(", ", foundPositions));
+        if (foundPositions.size() == 50) {
+            result.append(" ...（已达到最大显示数量）");
+        }
+        
+        return result.toString();
+    }
+
     @Tool("获取机器人周围的实体信息(玩家、怪物、掉落物等)。用于观察环境和其它玩家位置。")
     public String getNearbyEntities(@P("搜索半径(方块距离，最大建议50)") double radius) {
         logger.info("[AI Tool Call] 调用了 getNearbyEntities(radius={})", radius);
