@@ -28,10 +28,11 @@ public class MemoryTools {
     @Tool("清除机器人的所有对话记忆（历史记录）。当你发现机器人胡言乱语或者需要开始新话题时使用。")
     public String clearMemory() {
         logger.info("[AI Tool Call] 调用了 clearMemory()");
-        if (XinAgentPlugin.Instance != null && XinAgentPlugin.Instance.agentManager != null) {
-            XinAgentPlugin.Instance.agentManager.clearMemory();
-            return "记忆已清除，我们可以重新开始了。";
+        if (XinAgentPlugin.Instance == null || XinAgentPlugin.Instance.agentManager == null) {
+            return "清除记忆失败，插件未就绪。";
         }
-        return "清除记忆失败，插件未就绪。";
+        
+        XinAgentPlugin.Instance.agentManager.clearMemory();
+        return "记忆已清除，我们可以重新开始了。";
     }
 }
