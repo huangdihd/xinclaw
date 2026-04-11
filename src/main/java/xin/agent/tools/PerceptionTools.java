@@ -77,22 +77,42 @@ public class PerceptionTools {
             return "查询范围过大，方块数量超过1000个。请缩小查询范围。";
         }
 
-        Map<String, Integer> blockCounts = new HashMap<>();
+        Map<String, java.util.List<String>> blockPositions = new HashMap<>();
 
         for (int x = minX; x <= maxX; x++) {
             for (int y = minY; y <= maxY; y++) {
                 for (int z = minZ; z <= maxZ; z++) {
                     int blockStateId = MovementSync.Instance.getWorld().getBlockAt(new Vector3d(x, y, z));
                     String blockName = String.valueOf(BlockStateParser.Instance.parseStateId(blockStateId));
-                    blockCounts.put(blockName, blockCounts.getOrDefault(blockName, 0) + 1);
+                    
+                    // 忽略空气方块以减少无用信息
+                    if (blockName.contains("air") || blockName.contains("Air")) continue;
+                    
+                    blockPositions.computeIfAbsent(blockName, k -> new java.util.ArrayList<>())
+                            .add(String.format("(%d,%d,%d)", x, y, z));
                 }
             }
         }
         
         StringBuilder result = new StringBuilder();
-        result.append(String.format("区域 (%d,%d,%d) 到 (%d,%d,%d) 的方块统计:\n", minX, minY, minZ, maxX, maxY, maxZ));
-        for (Map.Entry<String, Integer> entry : blockCounts.entrySet()) {
-            result.append(String.format("- %s: %d个\n", entry.getKey(), entry.getValue()));
+        result.append(String.format("区域 (%d,%d,%d) 到 (%d,%d,%d) 的非空方块详情:\n", minX, minY, minZ, maxX, maxY, maxZ));
+        
+        if (blockPositions.isEmpty()) {
+            return result.append("该区域内全为空气。").toString();
+        }
+        
+        for (Map.Entry<String, java.util.List<String>> entry : blockPositions.entrySet()) {
+            java.util.List<String> coords = entry.getValue();
+            result.append(String.format("- %s (共%d个): ", entry.getKey(), coords.size()));
+            
+            // 为了防止Token超限，如果同种方块过多，只显示前20个的坐标
+            if (coords.size() > 20) {
+                result.append(String.join(", ", coords.subList(0, 20)));
+                result.append(" ...等\n");
+            } else {
+                result.append(String.join(", ", coords));
+                result.append("\n");
+            }
         }
         
         return result.toString();
