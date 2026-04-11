@@ -17,15 +17,21 @@
 
 package xin.agent;
 
+import org.jline.utils.AttributedStyle;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import xin.bbtt.mcbot.command.Command;
 import xin.bbtt.mcbot.command.CommandExecutor;
 import xin.bbtt.mcbot.Bot;
+import xin.bbtt.mcbot.Utils;
+
+import java.util.List;
+import java.util.stream.Collectors;
 
 public class AgentCommandExecutor extends CommandExecutor {
 
     private static final Logger logger = LoggerFactory.getLogger(AgentCommandExecutor.class);
+    private static final List<String> SUB_COMMANDS = List.of("clear");
 
     @Override
     public void onCommand(Command command, String label, String[] args) {
@@ -66,6 +72,21 @@ public class AgentCommandExecutor extends CommandExecutor {
                 }
             });
         }
+    }
+
+    @Override
+    public List<String> onTabComplete(Command cmd, String label, String[] args) {
+        if (args.length == 1) {
+            return SUB_COMMANDS.stream()
+                    .filter(s -> s.startsWith(args[0].toLowerCase()))
+                    .collect(Collectors.toList());
+        }
+        return List.of();
+    }
+
+    @Override
+    public AttributedStyle[] onHighlight(Command cmd, String label, String[] args) {
+        return Utils.parseContainHighlight(args, SUB_COMMANDS, AttributedStyle.DEFAULT.foreground(AttributedStyle.CYAN), AttributedStyle.DEFAULT);
     }
 
     private void sendInChunks(String text) {
