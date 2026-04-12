@@ -82,7 +82,7 @@ public class MovementTools {
         return "机器人已执行跳跃。";
     }
 
-    @Tool("智能寻路到指定的绝对坐标点 x, y, z。会自动绕过障碍物。由于性能限制，目标距离不建议超过30格。")
+    @Tool("智能动态寻路(D*)到指定的绝对坐标点 x, y, z。会自动绕过障碍物并适应地形变化。目标距离建议在40格内。")
     public String pathfindTo(
             @P("目标 X 坐标") double x,
             @P("目标 Y 坐标") double y,
@@ -99,27 +99,19 @@ public class MovementTools {
             return "目标距离过远(>40格)，寻路算法可能会失败或消耗过多性能。建议先使用 walkTo 靠近目标。";
         }
 
-        java.util.List<Vector3d> path = xin.agent.AStarPathfinder.findPath(currentPos, targetPos, 40);
-        
-        if (path == null || path.isEmpty()) {
-            return "找不到前往坐标 (" + x + ", " + y + ", " + z + ") 的有效路径，可能被完全阻挡。";
-        }
-
         MovementSync.Instance.movementController.cancelAll(); // 清除之前的移动任务
-        
-        Vector3d posTracker = new Vector3d(currentPos);
-        for (Vector3d waypoint : path) {
-            double distance = posTracker.distance(waypoint);
-            if (distance < 0.1) continue;
-            
-            Vector3d direction = new Vector3d(waypoint).sub(posTracker).normalize();
-            Vector3d velocity = direction.mul(MovementSync.movementSpeed);
-            long timeMs = (long) ((distance / MovementSync.movementSpeed) * 50);
-            
-            MovementSync.Instance.movementController.addMovement(new WalkMovement(velocity, timeMs));
-            posTracker = waypoint;
-        }
+        MovementSync.Instance.movementController.addMovement(new xin.agent.DynamicPathMovement(targetPos, 40));
 
-        return String.format("寻路成功！已规划包含 %d 个节点的路径，开始前往坐标 (%.2f, %.2f, %.2f)。", path.size(), x, y, z);
+        return String.format("动态寻路已启动，开始前往坐标 (%.2f, %.2f, %.2f)。在到达目标前机器人会自动调整路径。你可以通过 stopWalking 中途叫停。", x, y, z);
+    }
+
+    @Tool("强制让机器人停止所有移动、寻路行为。当你想要它停下时调用此方法。")
+    public String stopWalking() {
+        logger.info("[AI Tool Call] 调用了 stopWalking()");
+        if (MovementSync.Instance == null || MovementSync.Instance.movementController == null) {
+            return "MovementSync 插件尚未就绪。";
+        }
+        MovementSync.Instance.movementController.cancelAll();
+        return "已成功停止所有的寻路和移动任务。";
     }
 }

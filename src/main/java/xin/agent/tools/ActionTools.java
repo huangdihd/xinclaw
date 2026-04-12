@@ -85,6 +85,37 @@ public class ActionTools {
         return "已尝试使用手中的物品。如果是吃东西或拉弓，可能还需要调用 releaseUseItem 来结束动作。";
     }
 
+    @Tool("长按使用手中的物品（如吃食物、喝药水、拉满弓等），并在指定时间后自动松开。吃食物/喝药水通常需要 1600 毫秒，拉满弓通常需要 1000 毫秒。")
+    public String useItemWithDuration(@P("按住右键的持续时间（毫秒）") long durationMs) {
+        logger.info("[AI Tool Call] 调用了 useItemWithDuration(durationMs={})", durationMs);
+        if (Bot.Instance == null) return "Bot实例未初始化。";
+
+        int sequence = (int) Instant.now().toEpochMilli();
+        Bot.Instance.getSession().send(new ServerboundUseItemPacket(
+                Hand.MAIN_HAND,
+                sequence,
+                0, 0
+        ));
+
+        if (xin.agent.XinAgentPlugin.Instance.executorService != null && !xin.agent.XinAgentPlugin.Instance.executorService.isShutdown()) {
+            xin.agent.XinAgentPlugin.Instance.executorService.submit(() -> {
+                try {
+                    Thread.sleep(durationMs);
+                    if (Bot.Instance != null && Bot.Instance.getSession() != null) {
+                        Bot.Instance.getSession().send(new ServerboundPlayerActionPacket(
+                                PlayerAction.RELEASE_USE_ITEM,
+                                Vector3i.ZERO,
+                                Direction.DOWN,
+                                (int) Instant.now().toEpochMilli()
+                        ));
+                    }
+                } catch (InterruptedException ignored) {}
+            });
+        }
+
+        return "已开始使用物品，并将在 " + durationMs + " 毫秒后自动松开。";
+    }
+
     @Tool("松开使用物品的按键。当你正在吃东西、喝药水或者拉弓时，调用此方法来完成动作。")
     public String releaseUseItem() {
         logger.info("[AI Tool Call] 调用了 releaseUseItem()");
