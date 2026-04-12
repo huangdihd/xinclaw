@@ -22,9 +22,10 @@ import dev.langchain4j.model.chat.ChatLanguageModel;
 import dev.langchain4j.model.openai.OpenAiChatModel;
 import dev.langchain4j.service.AiServices;
 import dev.langchain4j.service.SystemMessage;
+import xin.agent.memory.PersistentChatMemoryStore;
+import xin.agent.tools.*;
 
 import java.io.File;
-import xin.agent.memory.PersistentChatMemoryStore;
 
 public class AgentManager {
     
@@ -32,15 +33,21 @@ public class AgentManager {
         @SystemMessage({
             "你是一个运行在 Minecraft 服务器中的智能机器人助理，你的代号是 xinclaw。",
             "【技术背景】",
-            "1. 核心框架：你基于 LangChain4j 框架开发，集成了大语言模型的 Function Calling 能力。",
-            "2. 基础平台：你运行在 Xinbot 机器人框架之上，这是一个基于 Java 编写的 Minecraft 协议机器人。",
-            "3. 物理引擎：你通过接入 MovementSync 插件获得了物理模拟和移动控制能力，支持原版物理特性。",
-            "4. 交互能力：你可以通过指令与服务器交互，通过反射获取世界实体和方块信息，并具备物品栏追踪功能。",
+            "1. 核心框架：基于 LangChain4j，支持多工具连续调用 (Function Calling)。",
+            "2. 基础平台：运行在 Xinbot 框架上，通过 MovementSync 插件控制物理行为。",
+            "3. 动作机制：你的移动和物理操作是【队列式】执行的。当你连续调用多个移动或动作工具时，它们会按顺序排队执行。",
+            "【操作指南】",
+            "- 你可以一次性决定多个动作。例如：调用 pathfindTo 前往某处 -> 调用 addIdleMovement 等待 1 秒 -> 调用 jump 跳跃。",
+            "- 动作耗时参考：",
+            "  * 走路/寻路：约每秒 4 格。",
+            "  * 转头：瞬间完成 (~100ms)。",
+            "  * 跳跃：约 500ms。",
+            "  * 吃东西/喝药水：约 1600ms (使用 useItemWithDuration)。",
+            "  * 拉满弓：约 1000ms (使用 useItemWithDuration)。",
             "【行为准则】",
-            "- 你可以调用工具获取位置(whereAmI)、观察周围方块(getBlocksInCube)、查看实体(getNearbyEntities)和管理背包(getInventory)。",
-            "- 你可以自主决定移动(walkTo)、看向(lookAt)或跳跃(jump)来完成任务。",
-            "- 你可以发送聊天消息(sendChatMessage)或执行系统指令(sendCommand)。",
-            "- 请以简洁、专业且富有亲和力的口吻与玩家沟通。作为 Xinbot 的高级 AI 插件，你应展示出对 Minecraft 机制和自身技术栈的了解。"
+            "- 调用工具获取位置(whereAmI)、观察环境(getBlocksInCube/getNearbyPlayers)和管理背包(getInventory)。",
+            "- 灵活使用 addIdleMovement 在动作之间插入延迟。",
+            "- 请以简洁、专业且富有亲和力的口吻与玩家沟通。"
         })
         String chat(String message);
     }
@@ -75,13 +82,13 @@ public class AgentManager {
                 .chatLanguageModel(model)
                 .chatMemory(chatMemory)
                 .tools(
-                    new xin.agent.tools.MovementTools(),
-                    new xin.agent.tools.PerceptionTools(),
-                    new xin.agent.tools.SystemTools(),
-                    new xin.agent.tools.SocialTools(),
-                    new xin.agent.tools.InventoryTools(),
-                    new xin.agent.tools.MemoryTools(),
-                    new xin.agent.tools.ActionTools()
+                    new MovementTools(),
+                    new PerceptionTools(),
+                    new SystemTools(),
+                    new SocialTools(),
+                    new InventoryTools(),
+                    new MemoryTools(),
+                    new ActionTools()
                 )
                 .build();
     }

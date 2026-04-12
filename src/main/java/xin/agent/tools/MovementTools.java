@@ -29,7 +29,7 @@ import xin.agent.pathfinding.DynamicPathMovement;
 public class MovementTools {
     private static final Logger logger = LoggerFactory.getLogger(MovementTools.class);
 
-    @Tool("让机器人行走(walk)到指定的绝对坐标点 x, y, z。")
+    @Tool("让机器人行走(walk)到指定的绝对坐标点 x, y, z。这是一个持续性动作，大约每秒可以移动 4.3 格。")
     public String walkTo(
             @P("目标 X 坐标") double x,
             @P("目标 Y 坐标") double y,
@@ -59,7 +59,7 @@ public class MovementTools {
         return String.format("已开始走向坐标 (%.2f, %.2f, %.2f), 预计需要 %d 毫秒。", x, y, z, timeMs);
     }
 
-    @Tool("让机器人看向(look)指定的绝对坐标点 x, y, z。")
+    @Tool("让机器人看向(look)指定的绝对坐标点 x, y, z。这是一个几乎瞬时的动作，大约耗时 100-500 毫秒。")
     public String lookAt(
             @P("目标 X 坐标") double x,
             @P("目标 Y 坐标") double y,
@@ -73,7 +73,7 @@ public class MovementTools {
         return String.format("机器人已经看向坐标 (%.2f, %.2f, %.2f)。", x, y, z);
     }
 
-    @Tool("让机器人跳跃(jump)。当遇到障碍物或者上台阶时调用此方法。")
+    @Tool("让机器人跳跃(jump)。这是一个物理动作，大约耗时 500 毫秒。")
     public String jump() {
         logger.info("[AI Tool Call] 调用了 jump()");
         
@@ -82,7 +82,17 @@ public class MovementTools {
         return "机器人已执行跳跃。";
     }
 
-    @Tool("智能动态寻路(D*)到指定的绝对坐标点 x, y, z。会自动绕过障碍物并适应地形变化。目标距离建议在40格内。")
+    @Tool("在移动任务队列中添加一段等待时间（不执行任何移动）。当你需要机器人停在原地等待一会儿再执行下一个动作时使用。")
+    public String addIdleMovement(@P("等待的持续时间（毫秒）") long durationMs) {
+        logger.info("[AI Tool Call] 调用了 addIdleMovement(ms={})", durationMs);
+        if (MovementSync.Instance == null || MovementSync.Instance.movementController == null) {
+            return "MovementSync 插件尚未就绪。";
+        }
+        MovementSync.Instance.movementController.addMovement(new xin.agent.pathfinding.IdleMovement(durationMs));
+        return "已在任务队列中添加了 " + durationMs + " 毫秒的等待时间。";
+    }
+
+    @Tool("智能动态寻路(D*)到指定的绝对坐标点 x, y, z。会自动绕过障碍物。大约每秒移动 3-4 格。")
     public String pathfindTo(
             @P("目标 X 坐标") double x,
             @P("目标 Y 坐标") double y,
