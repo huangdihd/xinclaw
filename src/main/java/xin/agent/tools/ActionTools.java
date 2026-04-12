@@ -42,9 +42,9 @@ import java.time.Instant;
 public class ActionTools {
     private static final Logger logger = LoggerFactory.getLogger(ActionTools.class);
 
-    private int getLatestSequence() {
+    private int getNextSequence() {
         if (XinAgentPlugin.Instance != null && XinAgentPlugin.Instance.sequenceTracker != null) {
-            return XinAgentPlugin.Instance.sequenceTracker.getSequence();
+            return XinAgentPlugin.Instance.sequenceTracker.getAndIncrement();
         }
         return 0;
     }
@@ -70,9 +70,11 @@ public class ActionTools {
             }
         }
 
+        // Swing hand BEFORE interaction
+        Bot.Instance.getSession().send(new ServerboundSwingPacket(Hand.MAIN_HAND));
+
         if (action == InteractAction.ATTACK) {
             Bot.Instance.getSession().send(new ServerboundInteractPacket(entityId, action, false));
-            Bot.Instance.getSession().send(new ServerboundSwingPacket(Hand.MAIN_HAND));
             return "已尝试攻击实体 ID " + entityId;
         } else {
             Bot.Instance.getSession().send(new ServerboundInteractPacket(entityId, action, Hand.MAIN_HAND, false));
@@ -94,14 +96,18 @@ public class ActionTools {
         logger.info("[AI Tool Call] useItem()");
         if (Bot.Instance == null) return "Bot实例未初始化。";
 
-        int sequence = getLatestSequence();
+        int sequence = getNextSequence();
+        
+        // Swing hand BEFORE interaction
+        Bot.Instance.getSession().send(new ServerboundSwingPacket(Hand.MAIN_HAND));
+
         Bot.Instance.getSession().send(new ServerboundUseItemPacket(
                 Hand.MAIN_HAND,
                 sequence,
                 MovementSync.Instance.yaw.get(),
                 MovementSync.Instance.pitch.get()
         ));
-        Bot.Instance.getSession().send(new ServerboundSwingPacket(Hand.MAIN_HAND));
+        
         return "已尝试使用物品 (Seq: " + sequence + ")";
     }
 
@@ -110,15 +116,18 @@ public class ActionTools {
         logger.info("[AI Tool Call] useItemWithDuration(ms={})", durationMs);
         if (Bot.Instance == null) return "Bot实例未初始化。";
 
-        int sequence = getLatestSequence();
-        Bot.Instance.getSession().send(new ServerboundUseItemPacket(Hand.MAIN_HAND, sequence, MovementSync.Instance.yaw.get(), MovementSync.Instance.pitch.get()));
+        int sequence = getNextSequence();
+        
+        // Swing hand BEFORE interaction
         Bot.Instance.getSession().send(new ServerboundSwingPacket(Hand.MAIN_HAND));
+
+        Bot.Instance.getSession().send(new ServerboundUseItemPacket(Hand.MAIN_HAND, sequence, MovementSync.Instance.yaw.get(), MovementSync.Instance.pitch.get()));
 
         if (XinAgentPlugin.Instance.executorService != null) {
             XinAgentPlugin.Instance.executorService.submit(() -> {
                 try {
                     Thread.sleep(durationMs);
-                    Bot.Instance.getSession().send(new ServerboundPlayerActionPacket(PlayerAction.RELEASE_USE_ITEM, Vector3i.ZERO, Direction.DOWN, getLatestSequence()));
+                    Bot.Instance.getSession().send(new ServerboundPlayerActionPacket(PlayerAction.RELEASE_USE_ITEM, Vector3i.ZERO, Direction.DOWN, getNextSequence()));
                 } catch (InterruptedException ignored) {}
             });
         }
@@ -129,7 +138,7 @@ public class ActionTools {
     public String releaseUseItem() {
         logger.info("[AI Tool Call] releaseUseItem()");
         if (Bot.Instance == null) return "Bot实例未初始化。";
-        Bot.Instance.getSession().send(new ServerboundPlayerActionPacket(PlayerAction.RELEASE_USE_ITEM, Vector3i.ZERO, Direction.DOWN, getLatestSequence()));
+        Bot.Instance.getSession().send(new ServerboundPlayerActionPacket(PlayerAction.RELEASE_USE_ITEM, Vector3i.ZERO, Direction.DOWN, getNextSequence()));
         return "已松开物品。";
     }
 
@@ -149,12 +158,14 @@ public class ActionTools {
 
         org.joml.Vector3d currentPos = MovementSync.Instance.position.get();
         double dist = currentPos.distance(new org.joml.Vector3d(x + 0.5, y + 0.5, z + 0.5));
-        logger.info("[Action] Distance to block: {}", dist);
         if (dist > 6) return "目标太远 (" + String.format("%.1f", dist) + "格)，无法交互。";
 
         RotationUtils.instantLookAt(new org.joml.Vector3d(x + 0.5, y + 0.5, z + 0.5));
         
-        int sequence = getLatestSequence();
+        // Swing hand BEFORE interaction
+        Bot.Instance.getSession().send(new ServerboundSwingPacket(Hand.MAIN_HAND));
+
+        int sequence = getNextSequence();
         Bot.Instance.getSession().send(new ServerboundUseItemOnPacket(
                 Vector3i.from(x, y, z),
                 direction,
@@ -164,9 +175,8 @@ public class ActionTools {
                 false, 
                 sequence
         ));
-        Bot.Instance.getSession().send(new ServerboundSwingPacket(Hand.MAIN_HAND));
         
-        return String.format("已尝试交互坐标 (%d, %d, %d)，距离: %.1f", x, y, z, dist);
+        return String.format("已尝试交互坐标 (%d, %d, %d)，距离: %.1f, Seq: %d", x, y, z, dist, sequence);
     }
 
     @Tool("挖掘指定坐标的方块。")
@@ -175,11 +185,17 @@ public class ActionTools {
         if (Bot.Instance == null) return "Bot实例未初始化。";
 
         RotationUtils.instantLookAt(new org.joml.Vector3d(x + 0.5, y + 0.5, z + 0.5));
-        int seq = getLatestSequence();
+        
+        // Swing hand
+        Bot.Instance.getSession().send(new ServerboundSwingPacket(Hand.MAIN_HAND));
+
+        int seq = getNextSequence();
         Vector3i pos = Vector3i.from(x, y, z);
         Bot.Instance.getSession().send(new ServerboundPlayerActionPacket(PlayerAction.START_DIGGING, pos, Direction.UP, seq));
-        Bot.Instance.getSession().send(new ServerboundSwingPacket(Hand.MAIN_HAND));
+        
+        // We might need a small delay here for realistic digging, but for creative/instant:
         Bot.Instance.getSession().send(new ServerboundPlayerActionPacket(PlayerAction.FINISH_DIGGING, pos, Direction.UP, seq));
+        
         return "已尝试挖掘坐标 (" + x + ", " + y + ", " + z + ")";
     }
 }

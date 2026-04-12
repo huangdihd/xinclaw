@@ -28,13 +28,17 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 public class SequenceTracker implements Listener {
     private static final Logger logger = LoggerFactory.getLogger(SequenceTracker.class);
-    private final AtomicInteger sequence = new AtomicInteger(0);
+    // Initialize with 1, as 0 is usually the "no sequence" value
+    private final AtomicInteger sequence = new AtomicInteger(1);
 
     @EventHandler
     public void onBlockChangedAck(ReceivePacketEvent<ClientboundBlockChangedAckPacket> event) {
-        int seq = event.getPacket().getSequence();
-        sequence.set(seq);
-        logger.debug("[Sequence] Updated to {}", seq);
+        int serverSeq = event.getPacket().getSequence();
+        // Sync our sequence to server if it's ahead
+        if (serverSeq >= sequence.get()) {
+            sequence.set(serverSeq + 1);
+        }
+        logger.debug("[Sequence] Server acknowledged {}, next client sequence: {}", serverSeq, sequence.get());
     }
 
     public int getSequence() {
