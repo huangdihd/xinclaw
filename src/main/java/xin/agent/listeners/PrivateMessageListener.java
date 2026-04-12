@@ -15,7 +15,7 @@
  *   along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-package xin.agent;
+package xin.agent.listeners;
 
 import xin.bbtt.mcbot.Bot;
 import xin.bbtt.mcbot.event.EventHandler;
@@ -26,6 +26,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.nio.charset.StandardCharsets;
+import xin.agent.XinAgentPlugin;
 
 public class PrivateMessageListener implements Listener {
     private static final Logger logger = LoggerFactory.getLogger(PrivateMessageListener.class);

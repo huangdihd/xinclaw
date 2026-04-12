@@ -1,4 +1,4 @@
-package xin.agent;
+package xin.agent.pathfinding;
 
 import org.cloudburstmc.math.vector.Vector3i;
 import org.joml.Vector3d;

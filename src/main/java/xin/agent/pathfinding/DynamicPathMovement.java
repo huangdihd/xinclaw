@@ -1,4 +1,4 @@
-package xin.agent;
+package xin.agent.pathfinding;
 
 import org.joml.Vector3d;
 import org.slf4j.Logger;

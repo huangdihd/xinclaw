@@ -15,7 +15,7 @@
  *   along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-package xin.agent;
+package xin.agent.commands;
 
 import org.jline.utils.AttributedStyle;
 import org.slf4j.Logger;
@@ -27,6 +27,7 @@ import xin.bbtt.mcbot.Utils;
 
 import java.util.List;
 import java.util.stream.Collectors;
+import xin.agent.XinAgentPlugin;
 
 public class AgentCommandExecutor extends CommandExecutor {
 

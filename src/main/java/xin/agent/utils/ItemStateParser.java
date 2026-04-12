@@ -15,7 +15,7 @@
  *   along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-package xin.agent;
+package xin.agent.utils;
 
 import com.google.gson.Gson;
 import com.google.gson.reflect.TypeToken;

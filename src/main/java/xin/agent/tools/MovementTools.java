@@ -24,6 +24,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import xin.bbtt.MovementSync;
 import xin.bbtt.movements.WalkMovement;
+import xin.agent.pathfinding.DynamicPathMovement;
 
 public class MovementTools {
     private static final Logger logger = LoggerFactory.getLogger(MovementTools.class);
@@ -100,7 +101,7 @@ public class MovementTools {
         }
 
         MovementSync.Instance.movementController.cancelAll(); // 清除之前的移动任务
-        MovementSync.Instance.movementController.addMovement(new xin.agent.DynamicPathMovement(targetPos, 40));
+        MovementSync.Instance.movementController.addMovement(new DynamicPathMovement(targetPos, 40));
 
         return String.format("动态寻路已启动，开始前往坐标 (%.2f, %.2f, %.2f)。在到达目标前机器人会自动调整路径。你可以通过 stopWalking 中途叫停。", x, y, z);
     }

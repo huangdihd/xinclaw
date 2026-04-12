@@ -25,7 +25,7 @@ import org.geysermc.mcprotocollib.protocol.data.game.inventory.ContainerActionTy
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.inventory.ServerboundContainerClickPacket;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import xin.agent.ItemStateParser;
+import xin.agent.utils.ItemStateParser;
 import xin.agent.XinAgentPlugin;
 import xin.bbtt.mcbot.Bot;
 

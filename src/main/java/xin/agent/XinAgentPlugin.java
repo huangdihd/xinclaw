@@ -25,6 +25,11 @@ import xin.bbtt.mcbot.plugin.Plugin;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import xin.agent.commands.AgentCommand;
+import xin.agent.commands.AgentCommandExecutor;
+import xin.agent.listeners.PrivateMessageListener;
+import xin.agent.trackers.DimensionTracker;
+import xin.agent.trackers.InventoryTracker;
 
 public class XinAgentPlugin implements Plugin {
 

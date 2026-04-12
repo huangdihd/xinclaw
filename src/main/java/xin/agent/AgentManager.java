@@ -24,6 +24,7 @@ import dev.langchain4j.service.AiServices;
 import dev.langchain4j.service.SystemMessage;
 
 import java.io.File;
+import xin.agent.memory.PersistentChatMemoryStore;
 
 public class AgentManager {
     
