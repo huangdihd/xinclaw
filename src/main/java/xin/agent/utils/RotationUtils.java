@@ -18,14 +18,20 @@
 package xin.agent.utils;
 
 import org.joml.Vector3d;
-import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundMovePlayerRotPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundMovePlayerPosRotPacket;
 import xin.bbtt.MovementSync;
 import xin.bbtt.mcbot.Bot;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class RotationUtils {
+    private static final Logger logger = LoggerFactory.getLogger(RotationUtils.class);
 
     public static void instantLookAt(Vector3d target) {
         if (MovementSync.Instance == null || Bot.Instance == null || Bot.Instance.getSession() == null) return;
+
+        Vector3d pos = MovementSync.Instance.position.get();
+        if (pos == null) return;
 
         Vector3d headPos = MovementSync.Instance.getHeadPosition();
         Vector3d delta = new Vector3d(target).sub(headPos);
@@ -41,10 +47,15 @@ public class RotationUtils {
         MovementSync.Instance.yaw.set(targetYaw);
         MovementSync.Instance.pitch.set(targetPitch);
 
-        // Sync to server immediately
-        Bot.Instance.getSession().send(new ServerboundMovePlayerRotPacket(
+        logger.debug("[Rotation] Instant look at ({}, {}, {}), Yaw: {}, Pitch: {}", target.x, target.y, target.z, targetYaw, targetPitch);
+
+        // Sync to server using the full PosRot packet which is more robust
+        Bot.Instance.getSession().send(new ServerboundMovePlayerPosRotPacket(
                 MovementSync.Instance.onGround.get(),
                 false, // horizontalCollision
+                pos.x,
+                pos.y,
+                pos.z,
                 targetYaw,
                 targetPitch
         ));

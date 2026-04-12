@@ -21,15 +21,20 @@ import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.play
 import xin.bbtt.mcbot.event.EventHandler;
 import xin.bbtt.mcbot.event.Listener;
 import xin.bbtt.mcbot.events.ReceivePacketEvent;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.concurrent.atomic.AtomicInteger;
 
 public class SequenceTracker implements Listener {
+    private static final Logger logger = LoggerFactory.getLogger(SequenceTracker.class);
     private final AtomicInteger sequence = new AtomicInteger(0);
 
     @EventHandler
     public void onBlockChangedAck(ReceivePacketEvent<ClientboundBlockChangedAckPacket> event) {
-        sequence.set(event.getPacket().getSequence());
+        int seq = event.getPacket().getSequence();
+        sequence.set(seq);
+        logger.debug("[Sequence] Updated to {}", seq);
     }
 
     public int getSequence() {

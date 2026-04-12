@@ -29,6 +29,7 @@ import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.Serv
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundUseItemPacket;
 import org.geysermc.mcprotocollib.protocol.data.game.entity.player.InteractAction;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundInteractPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundSwingPacket;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import xin.bbtt.mcbot.Bot;
@@ -72,7 +73,7 @@ public class ActionTools {
 
         if (action == InteractAction.ATTACK) {
             Bot.Instance.getSession().send(new ServerboundInteractPacket(entityId, action, false));
-            Bot.Instance.getSession().send(new org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundSwingPacket(Hand.MAIN_HAND));
+            Bot.Instance.getSession().send(new ServerboundSwingPacket(Hand.MAIN_HAND));
             return "已尝试攻击(ATTACK)实体 ID " + entityId + "。";
         } else {
             Bot.Instance.getSession().send(new ServerboundInteractPacket(entityId, action, Hand.MAIN_HAND, false));
@@ -96,6 +97,7 @@ public class ActionTools {
         if (Bot.Instance == null) return "Bot实例未初始化。";
 
         int sequence = getLatestSequence();
+        logger.debug("[Action] Using item with sequence {}", sequence);
         
         Bot.Instance.getSession().send(new ServerboundUseItemPacket(
                 Hand.MAIN_HAND,
@@ -104,7 +106,7 @@ public class ActionTools {
                 MovementSync.Instance.pitch.get()
         ));
         
-        Bot.Instance.getSession().send(new org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundSwingPacket(Hand.MAIN_HAND));
+        Bot.Instance.getSession().send(new ServerboundSwingPacket(Hand.MAIN_HAND));
         
         return "已尝试使用手中的物品。如果是吃东西或拉弓，可能还需要调用 releaseUseItem 来结束动作。";
     }
@@ -115,6 +117,7 @@ public class ActionTools {
         if (Bot.Instance == null) return "Bot实例未初始化。";
 
         int sequence = getLatestSequence();
+        logger.debug("[Action] Using item with duration {}ms and sequence {}", durationMs, sequence);
         
         Bot.Instance.getSession().send(new ServerboundUseItemPacket(
                 Hand.MAIN_HAND,
@@ -123,18 +126,20 @@ public class ActionTools {
                 MovementSync.Instance.pitch.get()
         ));
         
-        Bot.Instance.getSession().send(new org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundSwingPacket(Hand.MAIN_HAND));
+        Bot.Instance.getSession().send(new ServerboundSwingPacket(Hand.MAIN_HAND));
 
         if (XinAgentPlugin.Instance.executorService != null && !XinAgentPlugin.Instance.executorService.isShutdown()) {
             XinAgentPlugin.Instance.executorService.submit(() -> {
                 try {
                     Thread.sleep(durationMs);
                     if (Bot.Instance != null && Bot.Instance.getSession() != null) {
+                        int releaseSeq = getLatestSequence();
+                        logger.debug("[Action] Releasing item with sequence {}", releaseSeq);
                         Bot.Instance.getSession().send(new ServerboundPlayerActionPacket(
                                 PlayerAction.RELEASE_USE_ITEM,
                                 Vector3i.ZERO,
                                 Direction.DOWN,
-                                getLatestSequence()
+                                releaseSeq
                         ));
                     }
                 } catch (InterruptedException ignored) {}
@@ -149,11 +154,13 @@ public class ActionTools {
         logger.info("[AI Tool Call] 调用了 releaseUseItem()");
         if (Bot.Instance == null) return "Bot实例未初始化。";
         
+        int sequence = getLatestSequence();
+        logger.debug("[Action] Releasing item with sequence {}", sequence);
         Bot.Instance.getSession().send(new ServerboundPlayerActionPacket(
                 PlayerAction.RELEASE_USE_ITEM,
                 Vector3i.ZERO,
                 Direction.DOWN,
-                getLatestSequence()
+                sequence
         ));
         return "已松开使用物品的按键。";
     }
@@ -179,6 +186,10 @@ public class ActionTools {
         // INSTANT LOOK
         RotationUtils.instantLookAt(new org.joml.Vector3d(x + 0.5, y + 0.5, z + 0.5));
         
+        int sequence = getLatestSequence();
+        logger.debug("[Action] Interacting with block at ({}, {}, {}) with sequence {}", x, y, z, sequence);
+        
+        // 1.21.11 protocol requires isHitWorldBorder
         Bot.Instance.getSession().send(new ServerboundUseItemOnPacket(
                 pos,
                 direction,
@@ -186,10 +197,10 @@ public class ActionTools {
                 0.5f, 0.5f, 0.5f,
                 false,
                 false, 
-                getLatestSequence()
+                sequence
         ));
         
-        Bot.Instance.getSession().send(new org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundSwingPacket(Hand.MAIN_HAND));
+        Bot.Instance.getSession().send(new ServerboundSwingPacket(Hand.MAIN_HAND));
         
         return String.format("已尝试对坐标 (%d, %d, %d) 的 %s 面进行右键交互。", x, y, z, direction.name());
     }
@@ -207,6 +218,7 @@ public class ActionTools {
         RotationUtils.instantLookAt(new org.joml.Vector3d(x + 0.5, y + 0.5, z + 0.5));
         
         int seq = getLatestSequence();
+        logger.debug("[Action] Mining block at ({}, {}, {}) with sequence {}", x, y, z, seq);
 
         Bot.Instance.getSession().send(new ServerboundPlayerActionPacket(
                 PlayerAction.START_DIGGING,
@@ -215,7 +227,7 @@ public class ActionTools {
                 seq
         ));
 
-        Bot.Instance.getSession().send(new org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundSwingPacket(Hand.MAIN_HAND));
+        Bot.Instance.getSession().send(new ServerboundSwingPacket(Hand.MAIN_HAND));
 
         Bot.Instance.getSession().send(new ServerboundPlayerActionPacket(
                 PlayerAction.FINISH_DIGGING,
