@@ -1,3 +1,20 @@
+/*
+ *   Copyright (C) 2026 huangdihd
+ *
+ *   This program is free software: you can redistribute it and/or modify
+ *   it under the terms of the GNU General Public License as published by
+ *   the Free Software Foundation, either version 3 of the License, or
+ *   (at your option) any later version.
+ *
+ *   This program is distributed in the hope that it will be useful,
+ *   but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ *   GNU General Public License for more details.
+ *
+ *   You should have received a copy of the GNU General Public License
+ *   along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
 package xin.agent.pathfinding;
 
 import org.joml.Vector3d;
@@ -45,7 +62,7 @@ public class DynamicPathMovement extends Movement {
         if (this.currentPath == null || this.currentPath.isEmpty()) {
             logger.warn("[DynamicPathMovement] 寻路失败：找不到可行路径。");
         } else {
-            logger.info("[DynamicPathMovement] 寻路成功，重新规划了 {} 个节点。", this.currentPath.size());
+            logger.info("[DynamicPathMovement] 寻路规划成功，包含 {} 个节点。", this.currentPath.size());
         }
     }
 
@@ -55,15 +72,15 @@ public class DynamicPathMovement extends Movement {
         Vector3d pos = MovementSync.Instance.position.get();
         if (pos == null) return;
 
-        // 如果距离最终目标很近，就停止
-        if (pos.distanceSquared(finalTarget) < 0.5) {
+        // 1. 到达检查 (0.5格范围内视为到达)
+        if (pos.distanceSquared(finalTarget) < 0.25) {
             stopHorizontalMovement();
             return;
         }
 
-        // 如果没有路径，尝试重新规划（每2秒最多一次）
+        // 2. 无路重算
         if (currentPath == null || currentPath.isEmpty() || currentWaypointIndex >= currentPath.size()) {
-            if (System.currentTimeMillis() - lastRecalculateTime > 2000) {
+            if (System.currentTimeMillis() - lastRecalculateTime > 1500) {
                 recalculatePath();
             }
             if (currentPath == null || currentPath.isEmpty()) {
@@ -72,17 +89,14 @@ public class DynamicPathMovement extends Movement {
             }
         }
 
-        Vector3d currentWaypoint = currentPath.get(currentWaypointIndex);
-
-        // 检查是否卡住 (位置一直没变)
-        if (lastPos != null && pos.distanceSquared(lastPos) < 0.001) {
+        // 3. 卡住检查与脱困
+        if (lastPos != null && pos.distanceSquared(lastPos) < 0.0001) {
             stuckTicks++;
-            // 自动跳跃尝试解卡
             if (stuckTicks == 5) {
-                MovementSync.Instance.jump();
+                MovementSync.Instance.jump(); // 尝试跳跃脱困
             }
-            if (stuckTicks > 20) { // 卡住超过 1 秒，重新寻路
-                logger.warn("[DynamicPathMovement] 似乎卡住了，重新规划路径...");
+            if (stuckTicks > 20) { // 持续卡住 1 秒
+                logger.warn("[DynamicPathMovement] 机器人卡住了，尝试重规划...");
                 stuckTicks = 0;
                 recalculatePath();
                 return;
@@ -92,15 +106,16 @@ public class DynamicPathMovement extends Movement {
         }
         lastPos = new Vector3d(pos);
 
-        // 如果到达当前路点，前往下一个
+        // 4. 路点更新
+        Vector3d currentWaypoint = currentPath.get(currentWaypointIndex);
         double dx = currentWaypoint.x - pos.x;
         double dz = currentWaypoint.z - pos.z;
         double dist2D = Math.sqrt(dx * dx + dz * dz);
 
-        if (dist2D < 0.4) {
+        // 如果已经足够接近当前路点，切到下一个
+        if (dist2D < 0.5) {
             currentWaypointIndex++;
             if (currentWaypointIndex >= currentPath.size()) {
-                // 到达最后一个路点（可能是目标附近）
                 stopHorizontalMovement();
                 return;
             }
@@ -110,23 +125,23 @@ public class DynamicPathMovement extends Movement {
             dist2D = Math.sqrt(dx * dx + dz * dz);
         }
 
-        // 转向并移动
-        xin.agent.utils.RotationUtils.instantLookAt(currentWaypoint);
+        // 5. 转向与执行移动
+        MovementSync.Instance.lookAt(currentWaypoint);
 
-        // 如果需要爬坡且在边缘，自动跳跃
-        if (currentWaypoint.y > pos.y + 0.5 && dist2D < 1.0) {
+        // 自动跳跃逻辑：路点比当前高且水平距离近
+        if (currentWaypoint.y > pos.y + 0.1 && dist2D < 1.2) {
             MovementSync.Instance.jump();
         }
 
-        Vector3d dir = new Vector3d(dx, 0, dz).normalize();
-        double compensationFactor = 1.0 / (0.91 * 0.98); 
-        double speed = MovementSync.movementSpeed * compensationFactor;
-        
-        Vector3d currentVel = MovementSync.Instance.velocity.get();
-        double currentYVel = currentVel != null ? currentVel.y : 0;
-        
-        Vector3d newVel = new Vector3d(dir.x * speed, currentYVel, dir.z * speed);
-        MovementSync.Instance.velocity.set(newVel);
+        if (dist2D > 0) {
+            Vector3d dir = new Vector3d(dx, 0, dz).normalize();
+            double speed = MovementSync.movementSpeed;
+            Vector3d currentVel = MovementSync.Instance.velocity.get();
+            double currentYVel = currentVel != null ? currentVel.y : 0;
+            
+            // 每一帧强制维持速度，确保移动平滑
+            MovementSync.Instance.velocity.set(new Vector3d(dir.x * speed, currentYVel, dir.z * speed));
+        }
     }
 
     private void stopHorizontalMovement() {
@@ -138,13 +153,12 @@ public class DynamicPathMovement extends Movement {
 
     @Override
     public long getTime() {
-        // 这个移动任务是持续的，直到我们取消它或到达目标
-        return 60000; // 最多走 60 秒
+        return 60000; // 最大寻路持续 60 秒
     }
 
     @Override
     public void onStop() {
-        logger.info("[DynamicPathMovement] 动态寻路任务结束。");
+        logger.info("[DynamicPathMovement] 寻路任务已停止。");
         stopHorizontalMovement();
     }
 }
