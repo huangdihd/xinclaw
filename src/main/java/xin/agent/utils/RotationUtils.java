@@ -18,7 +18,7 @@
 package xin.agent.utils;
 
 import org.joml.Vector3d;
-import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundMovePlayerPosRotPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundMovePlayerRotPacket;
 import xin.bbtt.MovementSync;
 import xin.bbtt.mcbot.Bot;
 import org.slf4j.Logger;
@@ -29,9 +29,6 @@ public class RotationUtils {
 
     public static void instantLookAt(Vector3d target) {
         if (MovementSync.Instance == null || Bot.Instance == null || Bot.Instance.getSession() == null) return;
-
-        Vector3d pos = MovementSync.Instance.position.get();
-        if (pos == null) return;
 
         Vector3d headPos = MovementSync.Instance.getHeadPosition();
         Vector3d delta = new Vector3d(target).sub(headPos);
@@ -47,15 +44,12 @@ public class RotationUtils {
         MovementSync.Instance.yaw.set(targetYaw);
         MovementSync.Instance.pitch.set(targetPitch);
 
-        logger.debug("[Rotation] Instant look at ({}, {}, {}), Yaw: {}, Pitch: {}", target.x, target.y, target.z, targetYaw, targetPitch);
+        logger.info("[Rotation] Instant look at ({}, {}, {}), Yaw: {}, Pitch: {}", target.x, target.y, target.z, targetYaw, targetPitch);
 
-        // Sync to server using the full PosRot packet which is more robust
-        Bot.Instance.getSession().send(new ServerboundMovePlayerPosRotPacket(
+        // Sync to server using the 1.21.11-compliant Rot packet
+        Bot.Instance.getSession().send(new ServerboundMovePlayerRotPacket(
                 MovementSync.Instance.onGround.get(),
-                false, // horizontalCollision
-                pos.x,
-                pos.y,
-                pos.z,
+                false, // horizontalCollision (new in 1.21.11)
                 targetYaw,
                 targetPitch
         ));
