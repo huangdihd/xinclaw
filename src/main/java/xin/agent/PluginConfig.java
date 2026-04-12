@@ -32,6 +32,7 @@ public class PluginConfig {
     public static String apiBaseUrl = "";
     public static String modelName = "gpt-4o-mini";
     public static boolean enableThinking = false;
+    public static java.util.Set<String> privateMessageBlacklist = new java.util.HashSet<>();
 
     public static void loadConfig() {
         String pluginDirStr = xin.bbtt.mcbot.Bot.Instance.getConfig().getConfigData().getPlugin().getDirectory();
@@ -53,6 +54,15 @@ public class PluginConfig {
                 apiBaseUrl = props.getProperty("api_base_url", apiBaseUrl);
                 modelName = props.getProperty("model_name", modelName);
                 enableThinking = Boolean.parseBoolean(props.getProperty("enable_thinking", String.valueOf(enableThinking)));
+                
+                String blacklistStr = props.getProperty("private_message_blacklist", "");
+                privateMessageBlacklist.clear();
+                if (!blacklistStr.isEmpty()) {
+                    for (String s : blacklistStr.split(",")) {
+                        privateMessageBlacklist.add(s.trim().toLowerCase());
+                    }
+                }
+                
                 logger.info("Configuration loaded from {}", configFileStr);
             } catch (IOException e) {
                 logger.error("Failed to load config file", e);
@@ -62,6 +72,7 @@ public class PluginConfig {
             props.setProperty("api_base_url", apiBaseUrl);
             props.setProperty("model_name", modelName);
             props.setProperty("enable_thinking", String.valueOf(enableThinking));
+            props.setProperty("private_message_blacklist", "back,help");
             try (FileOutputStream out = new FileOutputStream(file)) {
                 props.store(out, "XinAgent Configuration");
                 logger.info("Default configuration created at {}", configFileStr);

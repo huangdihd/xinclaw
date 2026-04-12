@@ -27,6 +27,7 @@ import org.slf4j.LoggerFactory;
 
 import java.nio.charset.StandardCharsets;
 import xin.agent.XinAgentPlugin;
+import xin.agent.PluginConfig;
 
 public class PrivateMessageListener implements Listener {
     private static final Logger logger = LoggerFactory.getLogger(PrivateMessageListener.class);
@@ -45,6 +46,13 @@ public class PrivateMessageListener implements Listener {
         }
 
         String message = event.getMessage();
+        
+        // 屏蔽词检查 (等于模式)
+        if (PluginConfig.privateMessageBlacklist.contains(message.trim().toLowerCase())) {
+            logger.info("Ignoring private message from owner because it is in the blacklist: {}", message);
+            return;
+        }
+
         logger.info("Received private message from owner {}: {}", senderName, message);
         
         // 使用托管的线程池执行任务
