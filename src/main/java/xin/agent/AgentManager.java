@@ -17,6 +17,7 @@
 
 package xin.agent;
 
+import dev.langchain4j.memory.ChatMemory;
 import dev.langchain4j.memory.chat.MessageWindowChatMemory;
 import dev.langchain4j.model.chat.ChatLanguageModel;
 import dev.langchain4j.model.openai.OpenAiChatModel;
@@ -73,8 +74,8 @@ public class AgentManager {
         String pluginDir = xin.bbtt.mcbot.Bot.Instance.getConfig().getConfigData().getPlugin().getDirectory();
         String configDir = pluginDir + File.separator + "XinAgent";
         
-        var chatMemory = MessageWindowChatMemory.builder()
-                .maxMessages(20)
+        ChatMemory chatMemory = MessageWindowChatMemory.builder()
+                .maxMessages(Integer.MAX_VALUE) // 移除限制，允许无限长度记忆（仅受模型上下文 Token 限制）
                 .chatMemoryStore(new PersistentChatMemoryStore(configDir))
                 .build();
 
