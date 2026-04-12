@@ -32,11 +32,21 @@ import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.Serv
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import xin.bbtt.mcbot.Bot;
+import xin.bbtt.MovementSync;
+import xin.agent.XinAgentPlugin;
+import xin.agent.utils.RotationUtils;
 
 import java.time.Instant;
 
 public class ActionTools {
     private static final Logger logger = LoggerFactory.getLogger(ActionTools.class);
+
+    private int getLatestSequence() {
+        if (XinAgentPlugin.Instance != null && XinAgentPlugin.Instance.sequenceTracker != null) {
+            return XinAgentPlugin.Instance.sequenceTracker.getSequence();
+        }
+        return 0;
+    }
 
     @Tool("与指定的实体(玩家、动物、怪物等)进行交互。可以用于攻击(ATTACK)或者右键交互(INTERACT，如骑马、与村民交易、打开箱子矿车等)。")
     public String interactEntity(
@@ -52,8 +62,17 @@ public class ActionTools {
             return "无效的动作: " + actionStr + "。请使用 INTERACT 或 ATTACK。";
         }
 
+        // Try to look at the entity before interacting
+        if (MovementSync.Instance != null && MovementSync.Instance.getWorld() != null) {
+            xin.bbtt.Entity.Entity entity = MovementSync.Instance.getWorld().getEntity(entityId);
+            if (entity != null && entity.getPosition() != null) {
+                RotationUtils.instantLookAt(entity.getPosition());
+            }
+        }
+
         if (action == InteractAction.ATTACK) {
             Bot.Instance.getSession().send(new ServerboundInteractPacket(entityId, action, false));
+            Bot.Instance.getSession().send(new org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundSwingPacket(Hand.MAIN_HAND));
             return "已尝试攻击(ATTACK)实体 ID " + entityId + "。";
         } else {
             Bot.Instance.getSession().send(new ServerboundInteractPacket(entityId, action, Hand.MAIN_HAND, false));
@@ -76,18 +95,15 @@ public class ActionTools {
         logger.info("[AI Tool Call] 调用了 useItem()");
         if (Bot.Instance == null) return "Bot实例未初始化。";
 
-        int sequence = 0;
-        if (xin.agent.XinAgentPlugin.Instance.sequenceTracker != null) {
-            sequence = xin.agent.XinAgentPlugin.Instance.sequenceTracker.getAndIncrement();
-        }
+        int sequence = getLatestSequence();
         
         Bot.Instance.getSession().send(new ServerboundUseItemPacket(
                 Hand.MAIN_HAND,
                 sequence,
-                0, 0
+                MovementSync.Instance.yaw.get(),
+                MovementSync.Instance.pitch.get()
         ));
         
-        // Swing hand
         Bot.Instance.getSession().send(new org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundSwingPacket(Hand.MAIN_HAND));
         
         return "已尝试使用手中的物品。如果是吃东西或拉弓，可能还需要调用 releaseUseItem 来结束动作。";
@@ -95,37 +111,30 @@ public class ActionTools {
 
     @Tool("长按使用手中的物品（如吃食物、喝药水、拉满弓等），并在指定时间后自动松开。吃食物/喝药水通常需要 1600 毫秒，拉满弓通常需要 1000 毫秒。")
     public String useItemWithDuration(@P("按住右键的持续时间（毫秒）") long durationMs) {
-        logger.info("[AI Tool Call] 调用 l useItemWithDuration(durationMs={})", durationMs);
+        logger.info("[AI Tool Call] 调用了 useItemWithDuration(durationMs={})", durationMs);
         if (Bot.Instance == null) return "Bot实例未初始化。";
 
-        int sequence = 0;
-        if (xin.agent.XinAgentPlugin.Instance.sequenceTracker != null) {
-            sequence = xin.agent.XinAgentPlugin.Instance.sequenceTracker.getAndIncrement();
-        }
+        int sequence = getLatestSequence();
         
         Bot.Instance.getSession().send(new ServerboundUseItemPacket(
                 Hand.MAIN_HAND,
                 sequence,
-                0, 0
+                MovementSync.Instance.yaw.get(),
+                MovementSync.Instance.pitch.get()
         ));
         
-        // Swing hand
         Bot.Instance.getSession().send(new org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundSwingPacket(Hand.MAIN_HAND));
 
-        if (xin.agent.XinAgentPlugin.Instance.executorService != null && !xin.agent.XinAgentPlugin.Instance.executorService.isShutdown()) {
-            xin.agent.XinAgentPlugin.Instance.executorService.submit(() -> {
+        if (XinAgentPlugin.Instance.executorService != null && !XinAgentPlugin.Instance.executorService.isShutdown()) {
+            XinAgentPlugin.Instance.executorService.submit(() -> {
                 try {
                     Thread.sleep(durationMs);
                     if (Bot.Instance != null && Bot.Instance.getSession() != null) {
-                        int releaseSeq = 0;
-                        if (xin.agent.XinAgentPlugin.Instance.sequenceTracker != null) {
-                            releaseSeq = xin.agent.XinAgentPlugin.Instance.sequenceTracker.getAndIncrement();
-                        }
                         Bot.Instance.getSession().send(new ServerboundPlayerActionPacket(
                                 PlayerAction.RELEASE_USE_ITEM,
                                 Vector3i.ZERO,
                                 Direction.DOWN,
-                                releaseSeq
+                                getLatestSequence()
                         ));
                     }
                 } catch (InterruptedException ignored) {}
@@ -140,12 +149,11 @@ public class ActionTools {
         logger.info("[AI Tool Call] 调用了 releaseUseItem()");
         if (Bot.Instance == null) return "Bot实例未初始化。";
         
-        int sequence = (int) Instant.now().toEpochMilli();
         Bot.Instance.getSession().send(new ServerboundPlayerActionPacket(
                 PlayerAction.RELEASE_USE_ITEM,
                 Vector3i.ZERO,
                 Direction.DOWN,
-                sequence
+                getLatestSequence()
         ));
         return "已松开使用物品的按键。";
     }
@@ -167,23 +175,20 @@ public class ActionTools {
         }
 
         Vector3i pos = Vector3i.from(x, y, z);
-        int sequence = 0;
-        if (xin.agent.XinAgentPlugin.Instance.sequenceTracker != null) {
-            sequence = xin.agent.XinAgentPlugin.Instance.sequenceTracker.getAndIncrement();
-        }
         
-        // 1.21.11 protocol requires isHitWorldBorder
+        // INSTANT LOOK
+        RotationUtils.instantLookAt(new org.joml.Vector3d(x + 0.5, y + 0.5, z + 0.5));
+        
         Bot.Instance.getSession().send(new ServerboundUseItemOnPacket(
                 pos,
                 direction,
                 Hand.MAIN_HAND,
                 0.5f, 0.5f, 0.5f,
                 false,
-                false, // isHitWorldBorder
-                sequence
+                false, 
+                getLatestSequence()
         ));
         
-        // Swing hand
         Bot.Instance.getSession().send(new org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundSwingPacket(Hand.MAIN_HAND));
         
         return String.format("已尝试对坐标 (%d, %d, %d) 的 %s 面进行右键交互。", x, y, z, direction.name());
@@ -198,28 +203,25 @@ public class ActionTools {
         if (Bot.Instance == null) return "Bot实例未初始化。";
 
         Vector3i pos = Vector3i.from(x, y, z);
-        int sequence = 0;
-        if (xin.agent.XinAgentPlugin.Instance.sequenceTracker != null) {
-            sequence = xin.agent.XinAgentPlugin.Instance.sequenceTracker.getAndIncrement();
-        }
+        
+        RotationUtils.instantLookAt(new org.joml.Vector3d(x + 0.5, y + 0.5, z + 0.5));
+        
+        int seq = getLatestSequence();
 
-        // 发送开始挖掘
         Bot.Instance.getSession().send(new ServerboundPlayerActionPacket(
                 PlayerAction.START_DIGGING,
                 pos,
                 Direction.UP,
-                sequence
+                seq
         ));
 
-        // Swing hand
         Bot.Instance.getSession().send(new org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundSwingPacket(Hand.MAIN_HAND));
 
-        // 发送结束挖掘 (对于创造模式或者瞬间破坏的方块有效)
         Bot.Instance.getSession().send(new ServerboundPlayerActionPacket(
                 PlayerAction.FINISH_DIGGING,
                 pos,
                 Direction.UP,
-                sequence + 1
+                seq
         ));
 
         return String.format("已尝试挖掘坐标 (%d, %d, %d) 的方块。", x, y, z);

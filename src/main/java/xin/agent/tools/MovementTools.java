@@ -67,10 +67,9 @@ public class MovementTools {
         
         logger.info("[AI Tool Call] 调用了 lookAt(x={}, y={}, z={})", x, y, z);
         
-        if (MovementSync.Instance == null) return "插件未就绪。";
+        if (xin.bbtt.MovementSync.Instance == null) return "插件未就绪。";
 
-        Vector3d target = new Vector3d(x, y, z);
-        MovementSync.Instance.lookAt(target);
+        xin.agent.utils.RotationUtils.instantLookAt(new org.joml.Vector3d(x, y, z));
         return String.format("机器人已经看向坐标 (%.2f, %.2f, %.2f)。", x, y, z);
     }
 

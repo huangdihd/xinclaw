@@ -111,7 +111,7 @@ public class DynamicPathMovement extends Movement {
         }
 
         // 转向并移动
-        MovementSync.Instance.lookAt(currentWaypoint);
+        xin.agent.utils.RotationUtils.instantLookAt(currentWaypoint);
 
         // 如果需要爬坡且在边缘，自动跳跃
         if (currentWaypoint.y > pos.y + 0.5 && dist2D < 1.0) {
