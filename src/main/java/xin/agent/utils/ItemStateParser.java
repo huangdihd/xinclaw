@@ -35,7 +35,7 @@ public class ItemStateParser {
 
     private void loadItems() {
         try (BufferedReader reader = new BufferedReader(new InputStreamReader(
-                Objects.requireNonNull(getClass().getClassLoader().getResourceAsStream("blocks.json")),
+                Objects.requireNonNull(getClass().getClassLoader().getResourceAsStream("items.json")),
                 StandardCharsets.UTF_8))) {
             String content = reader.lines().collect(Collectors.joining("\n"));
             Gson gson = new Gson();
@@ -50,11 +50,12 @@ public class ItemStateParser {
 
     public String getItemName(int id) {
         ItemEntry entry = itemMap.get(id);
-        return entry != null ? entry.name : "unknown_item_" + id;
+        return entry != null ? (entry.displayName != null ? entry.displayName : entry.name) : "未知物品(ID:" + id + ")";
     }
 
     private static class ItemEntry {
         int id;
         String name;
+        String displayName;
     }
 }
