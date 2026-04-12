@@ -47,7 +47,13 @@ public class PerceptionTools {
     public String getCurrentWorld() {
         logger.info("[AI Tool Call] 调用了 getCurrentWorld()");
         if (Bot.Instance == null || Bot.Instance.getServer() == null) return "未知服务器";
-        return "当前所在的服务器/世界: " + Bot.Instance.getServer().name();
+        
+        String dimension = "未知维度";
+        if (xin.agent.XinAgentPlugin.Instance != null && xin.agent.XinAgentPlugin.Instance.dimensionTracker != null) {
+            dimension = xin.agent.XinAgentPlugin.Instance.dimensionTracker.getCurrentDimension();
+        }
+        
+        return "当前所在的服务器: " + Bot.Instance.getServer().name() + "，所在维度: " + dimension;
     }
 
     @Tool("获取两个坐标点所构成的立方体范围内的所有方块信息。用于观察周围环境。")

@@ -57,7 +57,22 @@ public class ActionTools {
                 sequence,
                 0, 0
         ));
-        return "已尝试使用手中的物品。";
+        return "已尝试使用手中的物品。如果是吃东西或拉弓，可能还需要调用 releaseUseItem 来结束动作。";
+    }
+
+    @Tool("松开使用物品的按键。当你正在吃东西、喝药水或者拉弓时，调用此方法来完成动作。")
+    public String releaseUseItem() {
+        logger.info("[AI Tool Call] 调用了 releaseUseItem()");
+        if (Bot.Instance == null) return "Bot实例未初始化。";
+        
+        int sequence = (int) Instant.now().toEpochMilli();
+        Bot.Instance.getSession().send(new ServerboundPlayerActionPacket(
+                PlayerAction.RELEASE_USE_ITEM,
+                Vector3i.ZERO,
+                Direction.DOWN,
+                sequence
+        ));
+        return "已松开使用物品的按键。";
     }
 
     @Tool("对指定的方块进行交互（放置方块、打开箱子、按按钮等）。相当于对着该坐标右键。")

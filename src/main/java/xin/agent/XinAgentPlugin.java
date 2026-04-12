@@ -32,6 +32,7 @@ public class XinAgentPlugin implements Plugin {
     public static XinAgentPlugin Instance;
     public AgentManager agentManager;
     public InventoryTracker inventoryTracker;
+    public DimensionTracker dimensionTracker;
     public ExecutorService executorService;
 
     public XinAgentPlugin() {
@@ -62,6 +63,10 @@ public class XinAgentPlugin implements Plugin {
             inventoryTracker = new InventoryTracker();
             Bot.Instance.getPluginManager().events().registerEvents(inventoryTracker, this);
             logger.info("InventoryTracker initialized.");
+
+            dimensionTracker = new DimensionTracker();
+            Bot.Instance.getPluginManager().events().registerEvents(dimensionTracker, this);
+            logger.info("DimensionTracker initialized.");
 
             Bot.Instance.getPluginManager().events().registerEvents(new PrivateMessageListener(), this);
             logger.info("PrivateMessageListener initialized.");

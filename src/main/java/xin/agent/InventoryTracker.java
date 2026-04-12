@@ -29,26 +29,36 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public class InventoryTracker implements Listener {
 
-    // Map of windowId -> array of item stacks
     private final Map<Integer, ItemStack[]> containers = new ConcurrentHashMap<>();
+    private int playerInventoryStateId = 0;
 
     @EventHandler
     public void onSetContent(ReceivePacketEvent<ClientboundContainerSetContentPacket> event) {
         ClientboundContainerSetContentPacket packet = event.getPacket();
         containers.put(packet.getContainerId(), packet.getItems());
+        if (packet.getContainerId() == 0) {
+            playerInventoryStateId = packet.getStateId();
+        }
     }
 
     @EventHandler
     public void onSetSlot(ReceivePacketEvent<ClientboundContainerSetSlotPacket> event) {
         ClientboundContainerSetSlotPacket packet = event.getPacket();
         ItemStack[] items = containers.get(packet.getContainerId());
-        if (items != null && packet.getSlot() < items.length) {
+        if (items != null && packet.getSlot() >= 0 && packet.getSlot() < items.length) {
             items[packet.getSlot()] = packet.getItem();
+        }
+        if (packet.getContainerId() == 0) {
+            playerInventoryStateId = packet.getStateId();
         }
     }
 
     public ItemStack[] getInventory() {
-        // Window 0 is the player inventory
         return containers.get(0);
     }
+
+    public int getPlayerInventoryStateId() {
+        return playerInventoryStateId;
+    }
 }
+

@@ -17,11 +17,17 @@
 
 package xin.agent.tools;
 
+import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
+import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
+import org.geysermc.mcprotocollib.protocol.data.game.inventory.ClickItemAction;
+import org.geysermc.mcprotocollib.protocol.data.game.inventory.ContainerActionType;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.inventory.ServerboundContainerClickPacket;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import xin.agent.ItemStateParser;
 import xin.agent.XinAgentPlugin;
+import xin.bbtt.mcbot.Bot;
 
 public class InventoryTools {
     private static final Logger logger = LoggerFactory.getLogger(InventoryTools.class);
@@ -56,4 +62,32 @@ public class InventoryTools {
         
         return sb.toString();
     }
+
+    @Tool("点击操作机器人的物品栏（背包）或当前打开的容器中的指定槽位。可以用于移动物品、穿戴装备或丢弃物品。")
+    public String clickInventorySlot(
+            @P("你要点击的槽位号 (例如 0-45。通常 36-44 是快捷栏。)") int slot,
+            @P("点击动作：0 代表左键单击(拿起/放下全部)，1 代表右键单击(拿起一半/放下一个)") int button) {
+        logger.info("[AI Tool Call] 调用了 clickInventorySlot(slot={}, button={})", slot, button);
+
+        if (Bot.Instance == null || XinAgentPlugin.Instance == null || XinAgentPlugin.Instance.inventoryTracker == null) {
+            return "Bot或物品栏追踪器未初始化。";
+        }
+
+        int stateId = XinAgentPlugin.Instance.inventoryTracker.getPlayerInventoryStateId();
+        
+        ClickItemAction action = button == 1 ? ClickItemAction.RIGHT_CLICK : ClickItemAction.LEFT_CLICK;
+        
+        Bot.Instance.getSession().send(new ServerboundContainerClickPacket(
+                0, // 0 for player inventory
+                stateId,
+                slot,
+                ContainerActionType.CLICK_ITEM,
+                action,
+                null,
+                new Int2ObjectOpenHashMap<>()
+        ));
+
+        return "已向服务器发送点击槽位 " + slot + " 的请求（动作：" + action.name() + "）。";
+    }
 }
+
