@@ -156,6 +156,7 @@ public class ActionTools {
                 Hand.MAIN_HAND,
                 0.5f, 0.5f, 0.5f,
                 false,
+                false, // isHitWorldBorder
                 sequence
         ));
         return String.format("已尝试对坐标 (%d, %d, %d) 的 %s 面进行右键交互。", x, y, z, direction.name());
