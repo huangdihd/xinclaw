@@ -27,6 +27,8 @@ import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.Serv
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundSetCarriedItemPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundUseItemOnPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundUseItemPacket;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.player.InteractAction;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundInteractPacket;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import xin.bbtt.mcbot.Bot;
@@ -35,6 +37,29 @@ import java.time.Instant;
 
 public class ActionTools {
     private static final Logger logger = LoggerFactory.getLogger(ActionTools.class);
+
+    @Tool("与指定的实体(玩家、动物、怪物等)进行交互。可以用于攻击(ATTACK)或者右键交互(INTERACT，如骑马、与村民交易、打开箱子矿车等)。")
+    public String interactEntity(
+            @P("实体的 ID (可以通过 getNearbyEntities 获取)") int entityId,
+            @P("交互动作，可选值: INTERACT (右键交互), ATTACK (左键攻击)") String actionStr) {
+        logger.info("[AI Tool Call] 调用了 interactEntity(entityId={}, action={})", entityId, actionStr);
+        if (Bot.Instance == null) return "Bot实例未初始化。";
+
+        InteractAction action;
+        try {
+            action = InteractAction.valueOf(actionStr.toUpperCase());
+        } catch (IllegalArgumentException e) {
+            return "无效的动作: " + actionStr + "。请使用 INTERACT 或 ATTACK。";
+        }
+
+        if (action == InteractAction.ATTACK) {
+            Bot.Instance.getSession().send(new ServerboundInteractPacket(entityId, action, false));
+            return "已尝试攻击(ATTACK)实体 ID " + entityId + "。";
+        } else {
+            Bot.Instance.getSession().send(new ServerboundInteractPacket(entityId, action, Hand.MAIN_HAND, false));
+            return "已尝试与实体 ID " + entityId + " 进行右键交互(INTERACT)。";
+        }
+    }
 
     @Tool("切换机器人的主手快捷栏物品(0-8)。当你需要拿出不同物品（方块、食物、武器）时调用。")
     public String changeSlot(@P("快捷栏槽位编号 (0到8之间)") int slot) {
