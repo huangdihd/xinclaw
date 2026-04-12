@@ -79,7 +79,8 @@ public class AgentManager {
                     new xin.agent.tools.SystemTools(),
                     new xin.agent.tools.SocialTools(),
                     new xin.agent.tools.InventoryTools(),
-                    new xin.agent.tools.MemoryTools()
+                    new xin.agent.tools.MemoryTools(),
+                    new xin.agent.tools.ActionTools()
                 )
                 .build();
     }
