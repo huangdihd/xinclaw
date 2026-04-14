@@ -30,7 +30,6 @@ import xin.agent.commands.AgentCommandExecutor;
 import xin.agent.listeners.PrivateMessageListener;
 import xin.agent.trackers.DimensionTracker;
 import xin.agent.trackers.InventoryTracker;
-import xin.agent.trackers.SequenceTracker;
 
 public class XinAgentPlugin implements Plugin {
 
@@ -39,7 +38,6 @@ public class XinAgentPlugin implements Plugin {
     public AgentManager agentManager;
     public InventoryTracker inventoryTracker;
     public DimensionTracker dimensionTracker;
-    public SequenceTracker sequenceTracker;
     public ExecutorService executorService;
 
     public XinAgentPlugin() {
@@ -75,9 +73,7 @@ public class XinAgentPlugin implements Plugin {
             Bot.Instance.getPluginManager().events().registerEvents(dimensionTracker, this);
             logger.info("DimensionTracker initialized.");
 
-            sequenceTracker = new SequenceTracker();
-            Bot.Instance.getPluginManager().events().registerEvents(sequenceTracker, this);
-            logger.info("SequenceTracker initialized.");
+            // SequenceTracker is now built-in to Xinbot 1.18.1+
 
             Bot.Instance.getPluginManager().events().registerEvents(new PrivateMessageListener(), this);
             logger.info("PrivateMessageListener initialized.");

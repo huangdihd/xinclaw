@@ -25,6 +25,7 @@ import org.slf4j.LoggerFactory;
 import xin.bbtt.MovementSync;
 import xin.bbtt.movements.WalkMovement;
 import xin.agent.pathfinding.DynamicPathMovement;
+import xin.agent.pathfinding.IdleMovement;
 
 public class MovementTools {
     private static final Logger logger = LoggerFactory.getLogger(MovementTools.class);
@@ -67,9 +68,10 @@ public class MovementTools {
         
         logger.info("[AI Tool Call] 调用了 lookAt(x={}, y={}, z={})", x, y, z);
         
-        if (xin.bbtt.MovementSync.Instance == null) return "插件未就绪。";
+        if (MovementSync.Instance == null) return "插件未就绪。";
 
-        xin.agent.utils.RotationUtils.instantLookAt(new org.joml.Vector3d(x, y, z));
+        Vector3d target = new Vector3d(x, y, z);
+        MovementSync.Instance.lookAt(target);
         return String.format("机器人已经看向坐标 (%.2f, %.2f, %.2f)。", x, y, z);
     }
 
@@ -88,7 +90,7 @@ public class MovementTools {
         if (MovementSync.Instance == null || MovementSync.Instance.movementController == null) {
             return "MovementSync 插件尚未就绪。";
         }
-        MovementSync.Instance.movementController.addMovement(new xin.agent.pathfinding.IdleMovement(durationMs));
+        MovementSync.Instance.movementController.addMovement(new IdleMovement(durationMs));
         return "已在任务队列中添加了 " + durationMs + " 毫秒的等待时间。";
     }
 
