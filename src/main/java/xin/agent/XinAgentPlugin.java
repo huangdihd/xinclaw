@@ -21,6 +21,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import xin.bbtt.mcbot.Bot;
 import xin.bbtt.mcbot.plugin.Plugin;
+import xin.bbtt.MovementSync;
 
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -105,8 +106,23 @@ public class XinAgentPlugin implements Plugin {
 
                 if (hasInProgress) {
                     logger.info("[TaskLoop] 发现正在进行中的任务，唤醒 AI 继续工作...");
+                    
+                    String statusContext = "";
+                    if (MovementSync.Instance != null) {
+                        org.joml.Vector3i goal = MovementSync.Instance.getActiveGoal();
+                        boolean isMoving = MovementSync.Instance.getMovementController().getCurrentMovement() != null;
+                        
+                        if (goal != null) {
+                            if (!isMoving) {
+                                statusContext = String.format("\n[状态提示] 你当前设定了寻路目标 (%d, %d, %d)，但机器人目前处于静止状态。这通常意味着路径被完全堵死或目标不可达，请尝试重新规划路径或先挖掘周围障碍物。", goal.x, goal.y, goal.z);
+                            } else {
+                                statusContext = String.format("\n[状态提示] 机器人正在寻路前往 (%d, %d, %d)。", goal.x, goal.y, goal.z);
+                            }
+                        }
+                    }
+
                     // 发送背景提示，让 AI 决定下一步动作
-                    String response = agentManager.processMessage("[SYSTEM_TICK] 你当前有正在进行的任务。请检查环境并执行必要的工具调用以继续完成任务。如果你已经完成，请更新任务状态。");
+                    String response = agentManager.processMessage("[SYSTEM_TICK] 你当前有正在进行的任务。请检查环境并执行必要的工具调用以继续完成任务。如果你已经完成，请更新任务状态。" + statusContext);
                     if (response != null && !response.trim().isEmpty()) {
                         logger.info("[TaskLoop] AI 思考结果: {}", response);
                     }

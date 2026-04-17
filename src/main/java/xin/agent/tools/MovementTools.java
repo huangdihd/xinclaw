@@ -25,6 +25,9 @@ import org.slf4j.LoggerFactory;
 import xin.bbtt.MovementSync;
 import xin.bbtt.movements.WalkMovement;
 import xin.bbtt.movements.ActionMovement;
+import xin.bbtt.pathfinding.DStarLite;
+import xin.bbtt.pathfinding.Node;
+import java.util.List;
 
 public class MovementTools {
     private static final Logger logger = LoggerFactory.getLogger(MovementTools.class);
@@ -103,12 +106,24 @@ public class MovementTools {
             return "MovementSync 插件尚未就绪，无法移动。";
         }
 
+        Vector3d currentPos = MovementSync.Instance.position.get();
+        Node start = new Node((int) Math.floor(currentPos.x), (int) Math.floor(currentPos.y), (int) Math.floor(currentPos.z));
+        Node goal = new Node((int) Math.floor(x), (int) Math.floor(y), (int) Math.floor(z));
+
+        // 预检查路径是否通畅
+        DStarLite pf = new DStarLite(start, goal, MovementSync.Instance.getWorld());
+        List<Node> path = pf.findPath(2000); 
+
+        if (path == null || path.size() <= 1) {
+            return String.format("寻路失败：无法找到前往坐标 (%.1f, %.1f, %.1f) 的可行路径。目标可能在加载范围外，或者被完全封死。你可以尝试先向那个方向走一段路(walkTo)再重新寻路。", x, y, z);
+        }
+
         // 使用 MovementSync 1.3.3+ 内置的寻路引擎
         org.joml.Vector3i targetPos = new org.joml.Vector3i((int) Math.floor(x), (int) Math.floor(y), (int) Math.floor(z));
         MovementSync.Instance.setActiveGoal(targetPos);
         MovementSync.Instance.triggerAutoRepath();
 
-        return String.format("已启动内置寻路引擎，开始前往坐标 (%.2f, %.2f, %.2f)。机器人会自动处理障碍物。", x, y, z);
+        return String.format("已启动内置寻路引擎，寻路成功（包含 %d 个节点），开始前往坐标 (%.2f, %.2f, %.2f)。机器人会自动处理障碍物。", path.size(), x, y, z);
     }
 
     @Tool("强制让机器人停止所有移动、寻路行为。当你想要它停下时调用此方法。")
