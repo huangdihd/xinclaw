@@ -24,8 +24,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import xin.bbtt.MovementSync;
 import xin.bbtt.movements.WalkMovement;
-import xin.agent.pathfinding.DynamicPathMovement;
-import xin.agent.pathfinding.IdleMovement;
+import xin.bbtt.movements.ActionMovement;
 
 public class MovementTools {
     private static final Logger logger = LoggerFactory.getLogger(MovementTools.class);
@@ -90,11 +89,11 @@ public class MovementTools {
         if (MovementSync.Instance == null || MovementSync.Instance.movementController == null) {
             return "MovementSync 插件尚未就绪。";
         }
-        MovementSync.Instance.movementController.addMovement(new IdleMovement(durationMs));
+        MovementSync.Instance.movementController.addMovement(new ActionMovement(() -> {}, durationMs));
         return "已在任务队列中添加了 " + durationMs + " 毫秒的等待时间。";
     }
 
-    @Tool("智能动态寻路(D*)到指定的绝对坐标点 x, y, z。会自动绕过障碍物。大约每秒移动 3-4 格。")
+    @Tool("智能动态寻路到指定的绝对坐标点 x, y, z。会自动绕过障碍物、自动开路(挖方块)或搭桥。大约每秒移动 3-4 格。")
     public String pathfindTo(
             @P("目标 X 坐标") double x,
             @P("目标 Y 坐标") double y,
@@ -104,17 +103,12 @@ public class MovementTools {
             return "MovementSync 插件尚未就绪，无法移动。";
         }
 
-        Vector3d currentPos = new Vector3d(MovementSync.Instance.position.get());
-        Vector3d targetPos = new Vector3d(x, y, z);
+        // 使用 MovementSync 1.3.3+ 内置的寻路引擎
+        org.joml.Vector3i targetPos = new org.joml.Vector3i((int) Math.floor(x), (int) Math.floor(y), (int) Math.floor(z));
+        MovementSync.Instance.setActiveGoal(targetPos);
+        MovementSync.Instance.triggerAutoRepath();
 
-        if (currentPos.distance(targetPos) > 40) {
-            return "目标距离过远(>40格)，寻路算法可能会失败或消耗过多性能。建议先使用 walkTo 靠近目标。";
-        }
-
-        MovementSync.Instance.movementController.cancelAll(); // 清除之前的移动任务
-        MovementSync.Instance.movementController.addMovement(new DynamicPathMovement(targetPos, 40));
-
-        return String.format("动态寻路已启动，开始前往坐标 (%.2f, %.2f, %.2f)。在到达目标前机器人会自动调整路径。你可以通过 stopWalking 中途叫停。", x, y, z);
+        return String.format("已启动内置寻路引擎，开始前往坐标 (%.2f, %.2f, %.2f)。机器人会自动处理障碍物。", x, y, z);
     }
 
     @Tool("强制让机器人停止所有移动、寻路行为。当你想要它停下时调用此方法。")

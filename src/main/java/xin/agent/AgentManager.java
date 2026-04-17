@@ -24,6 +24,7 @@ import dev.langchain4j.model.openai.OpenAiChatModel;
 import dev.langchain4j.service.AiServices;
 import dev.langchain4j.service.SystemMessage;
 import xin.agent.memory.PersistentChatMemoryStore;
+import xin.agent.tasks.TaskManager;
 import xin.agent.tools.*;
 
 import java.io.File;
@@ -32,30 +33,30 @@ public class AgentManager {
     
     public interface BotAgent {
         @SystemMessage({
-            "你是一个运行在 Minecraft 服务器中的智能机器人助理，你的代号是 xinclaw。",
-            "【技术背景】",
-            "1. 核心框架：基于 LangChain4j，支持多工具连续调用 (Function Calling)。",
-            "2. 基础平台：运行在 Xinbot 框架上，通过 MovementSync 插件控制物理行为。",
-            "3. 动作机制：你的移动和物理操作是【队列式】执行的。当你连续调用多个移动或动作工具时，它们会按顺序排队执行。",
-            "【操作指南】",
-            "- 你可以一次性决定多个动作。例如：调用 pathfindTo 前往某处 -> 调用 addIdleMovement 等待 1 秒 -> 调用 jump 跳跃。",
-            "- 动作耗时参考：",
-            "  * 走路/寻路：约每秒 4 格。",
-            "  * 转头：瞬间完成 (~100ms)。",
-            "  * 跳跃：约 500ms。",
-            "  * 吃东西/喝药水：约 1600ms (使用 useItemWithDuration)。",
-            "  * 拉满弓：约 1000ms (使用 useItemWithDuration)。",
+            "你是一个运行在 Minecraft 服务器中的高级智能机器人助理，代号 xinclaw。",
+            "【核心能力：任务系统】",
+            "1. 你拥有一个持久化的任务列表系统，用于管理长期和短期目标。",
+            "2. 当玩家给你一个复杂指令（如：帮我收集木头并盖个房子）时，你应该：",
+            "   - 使用 addTask 将其分解为多个具体的子任务。",
+            "   - 使用 listTasks 随时查看所有任务的进度。",
+            "   - 使用 updateTaskStatus 将任务标记为 IN_PROGRESS（进行中）或 DONE（已完成）。",
+            "3. 即使在没有玩家说话时，你也会定期检查任务列表，并自动继续执行标记为 IN_PROGRESS 的任务。",
+            "【物理控制】",
+            "1. 动作队列：你的所有物理操作工具（移动、挖掘、放置）都是异步排队执行的。",
+            "2. 移动能力：内置寻路 (pathfindTo) 支持自动挖掘障碍物和自动搭桥。",
             "【行为准则】",
-            "- 调用工具获取位置(whereAmI)、观察环境(getBlocksInCube/getNearbyPlayers)和管理背包(getInventory)。",
-            "- 灵活使用 addIdleMovement 在动作之间插入延迟。",
-            "- 请以简洁、专业且富有亲和力的口吻与玩家沟通。"
+            "- 优先确保生存：如果血量过低，应优先执行避险任务。",
+            "- 保持进度透明：每当完成一个关键阶段或任务时，主动告知玩家。",
+            "- 说话简洁、专业且富有逻辑。"
         })
         String chat(String message);
     }
 
     private BotAgent agent;
+    private TaskManager taskManager;
 
     public AgentManager() {
+        this.taskManager = new TaskManager();
         initAgent();
     }
 
@@ -75,7 +76,7 @@ public class AgentManager {
         String configDir = pluginDir + File.separator + "XinAgent";
         
         ChatMemory chatMemory = MessageWindowChatMemory.builder()
-                .maxMessages(Integer.MAX_VALUE) // 移除限制，允许无限长度记忆（仅受模型上下文 Token 限制）
+                .maxMessages(Integer.MAX_VALUE)
                 .chatMemoryStore(new PersistentChatMemoryStore(configDir))
                 .build();
 
@@ -89,7 +90,8 @@ public class AgentManager {
                     new SocialTools(),
                     new InventoryTools(),
                     new MemoryTools(),
-                    new ActionTools()
+                    new ActionTools(),
+                    new TaskTools(taskManager)
                 )
                 .build();
     }
@@ -104,19 +106,16 @@ public class AgentManager {
         }
     }
 
+    public TaskManager getTaskManager() {
+        return taskManager;
+    }
+
     public void clearMemory() {
-        if (this.agent == null) {
-            return;
-        }
-        
+        if (this.agent == null) return;
         String pluginDir = xin.bbtt.mcbot.Bot.Instance.getConfig().getConfigData().getPlugin().getDirectory();
         String configDir = pluginDir + java.io.File.separator + "XinAgent";
         PersistentChatMemoryStore store = new PersistentChatMemoryStore(configDir);
-        
-        // In LangChain4j, memory is stored per ChatMemory instance which defaults to the memoryId "default"
         store.deleteMessages("default");
-        
-        // Re-initialize to ensure the proxy grabs the freshly cleared memory
         initAgent(); 
     }
 }

@@ -24,12 +24,15 @@ import xin.bbtt.mcbot.plugin.Plugin;
 
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.List;
 import xin.agent.commands.AgentCommand;
 import xin.agent.commands.AgentCommandExecutor;
 import xin.agent.listeners.PrivateMessageListener;
 import xin.agent.trackers.DimensionTracker;
 import xin.agent.trackers.InventoryTracker;
+import xin.agent.tasks.Task;
 
 public class XinAgentPlugin implements Plugin {
 
@@ -39,6 +42,7 @@ public class XinAgentPlugin implements Plugin {
     public InventoryTracker inventoryTracker;
     public DimensionTracker dimensionTracker;
     public ExecutorService executorService;
+    private ScheduledExecutorService scheduler;
 
     public XinAgentPlugin() {
     }
@@ -58,6 +62,7 @@ public class XinAgentPlugin implements Plugin {
         logger.info("Enabling XinAgentPlugin with Langchain4j...");
         Instance = this;
         this.executorService = Executors.newCachedThreadPool();
+        this.scheduler = Executors.newSingleThreadScheduledExecutor();
         
         try {
             PluginConfig.loadConfig();
@@ -73,32 +78,60 @@ public class XinAgentPlugin implements Plugin {
             Bot.Instance.getPluginManager().events().registerEvents(dimensionTracker, this);
             logger.info("DimensionTracker initialized.");
 
-            // SequenceTracker is now built-in to Xinbot 1.18.1+
-
             Bot.Instance.getPluginManager().events().registerEvents(new PrivateMessageListener(), this);
             logger.info("PrivateMessageListener initialized.");
             
+            Bot.Instance.getPluginManager().events().registerEvents(new xin.agent.listeners.MovementTeleportListener(), this);
+            logger.info("MovementTeleportListener initialized.");
+            
             Bot.Instance.getPluginManager().registerCommand(new AgentCommand(), new AgentCommandExecutor(), this);
             logger.info("Agent command registered.");
+
+            // 启动自主任务循环：每 15 秒检查一次
+            startTaskLoop();
         } catch (Throwable e) {
             logger.error("Failed to initialize XinAgentPlugin", e);
         }
     }
 
+    private void startTaskLoop() {
+        scheduler.scheduleAtFixedRate(() -> {
+            try {
+                if (agentManager == null || agentManager.getTaskManager() == null) return;
+                if (!Bot.Instance.isRunning()) return;
+
+                List<Task> tasks = agentManager.getTaskManager().getTasks();
+                boolean hasInProgress = tasks.stream().anyMatch(t -> t.getStatus() == Task.Status.IN_PROGRESS);
+
+                if (hasInProgress) {
+                    logger.info("[TaskLoop] 发现正在进行中的任务，唤醒 AI 继续工作...");
+                    // 发送背景提示，让 AI 决定下一步动作
+                    String response = agentManager.processMessage("[SYSTEM_TICK] 你当前有正在进行的任务。请检查环境并执行必要的工具调用以继续完成任务。如果你已经完成，请更新任务状态。");
+                    if (response != null && !response.trim().isEmpty()) {
+                        logger.info("[TaskLoop] AI 思考结果: {}", response);
+                    }
+                }
+            } catch (Exception e) {
+                logger.error("Error in task loop", e);
+            }
+        }, 30, 15, TimeUnit.SECONDS); // 启动后延迟 30 秒开始，每 15 秒运行一次
+    }
+
     @Override
     public void onDisable() {
         logger.info("Disabling XinAgentPlugin.");
-        if (executorService == null) {
-            return;
+        if (scheduler != null) {
+            scheduler.shutdownNow();
         }
-        
-        executorService.shutdown();
-        try {
-            if (!executorService.awaitTermination(2, TimeUnit.SECONDS)) {
+        if (executorService != null) {
+            executorService.shutdown();
+            try {
+                if (!executorService.awaitTermination(2, TimeUnit.SECONDS)) {
+                    executorService.shutdownNow();
+                }
+            } catch (InterruptedException e) {
                 executorService.shutdownNow();
             }
-        } catch (InterruptedException e) {
-            executorService.shutdownNow();
         }
     }
 

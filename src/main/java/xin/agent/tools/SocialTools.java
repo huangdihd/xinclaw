@@ -110,7 +110,32 @@ public class SocialTools {
         }
     }
 
-    @Tool("根据实体 ID (Entity ID) 获取对应的玩家名称。常用于将 getNearbyEntities 返回的 ID 转换为具体的玩家名。")
+    @Tool("跟随指定的玩家。机器人会自动寻路并保持在玩家周围。")
+    public String followPlayer(@P("要跟随的玩家实体 ID") int entityId) {
+        logger.info("[AI Tool Call] 调用了 followPlayer(id={})", entityId);
+        if (MovementSync.Instance == null) return "MovementSync 插件尚未就绪。";
+        
+        xin.bbtt.Entity.Entity entity = MovementSync.Instance.getWorld().getEntity(entityId);
+        if (entity == null) return "未找到 ID 为 " + entityId + " 的玩家，请确保他在视野范围内（可以通过 getNearbyPlayers 获取 ID）。";
+        
+        MovementSync.Instance.setFollowTargetId(entityId);
+        MovementSync.Instance.triggerAutoRepath();
+        
+        return "正在开始跟随实体 ID 为 " + entityId + " 的玩家。机器人会自动避障。";
+    }
+
+    @Tool("停止跟随玩家。")
+    public String stopFollowing() {
+        logger.info("[AI Tool Call] 调用了 stopFollowing()");
+        if (MovementSync.Instance == null) return "MovementSync 插件尚未就绪。";
+        
+        MovementSync.Instance.setFollowTargetId(-1);
+        MovementSync.Instance.getMovementController().cancelAll();
+        
+        return "已停止跟随玩家。";
+    }
+
+    @Tool("根据实体 ID (Entity ID) 获取对应的玩家名称。常用于将 getNearbyEntities 返回 host 的 ID 转换为具体的玩家名。")
     public String getPlayerNameByEntityId(@P("实体的 ID") int entityId) {
         logger.info("[AI Tool Call] 调用了 getPlayerNameByEntityId(id={})", entityId);
         if (MovementSync.Instance == null || MovementSync.Instance.getWorld() == null) return "世界未加载。";
