@@ -28,11 +28,12 @@ import xin.bbtt.mcbot.Utils;
 import java.util.List;
 import java.util.stream.Collectors;
 import xin.agent.XinAgentPlugin;
+import xin.agent.tasks.Task;
 
 public class AgentCommandExecutor extends CommandExecutor {
 
     private static final Logger logger = LoggerFactory.getLogger(AgentCommandExecutor.class);
-    private static final List<String> SUB_COMMANDS = List.of("clear");
+    private static final List<String> SUB_COMMANDS = List.of("clear", "task");
 
     @Override
     public void onCommand(Command command, String label, String[] args) {
@@ -49,6 +50,35 @@ public class AgentCommandExecutor extends CommandExecutor {
             XinAgentPlugin.Instance.agentManager.clearMemory();
             logger.info("Agent memory cleared by command.");
             Bot.Instance.sendChatMessage("AI 记忆已成功清除。");
+            return;
+        }
+
+        if (args[0].equalsIgnoreCase("task")) {
+            if (args.length == 1 || args[1].equalsIgnoreCase("list")) {
+                List<Task> tasks = XinAgentPlugin.Instance.agentManager.getTaskManager().getTasks();
+                if (tasks.isEmpty()) {
+                    logger.info("Task list is empty.");
+                } else {
+                    logger.info("--- Task List ---");
+                    for (Task t : tasks) {
+                        logger.info("{}", t.toString());
+                    }
+                    logger.info("-----------------");
+                }
+            } else if (args.length >= 3 && args[1].equalsIgnoreCase("add")) {
+                String desc = String.join(" ", java.util.Arrays.copyOfRange(args, 2, args.length));
+                XinAgentPlugin.Instance.agentManager.getTaskManager().addTask(desc);
+                logger.info("Added task: {}", desc);
+            } else if (args.length >= 3 && args[1].equalsIgnoreCase("rm")) {
+                String id = args[2];
+                if (XinAgentPlugin.Instance.agentManager.getTaskManager().removeTask(id)) {
+                    logger.info("Removed task: {}", id);
+                } else {
+                    logger.info("Task not found: {}", id);
+                }
+            } else {
+                logger.info("Usage: agent task [list | add <desc> | rm <id>]");
+            }
             return;
         }
 
@@ -82,6 +112,10 @@ public class AgentCommandExecutor extends CommandExecutor {
         if (args.length == 1) {
             return SUB_COMMANDS.stream()
                     .filter(s -> s.startsWith(args[0].toLowerCase()))
+                    .collect(Collectors.toList());
+        } else if (args.length == 2 && args[0].equalsIgnoreCase("task")) {
+            return List.of("list", "add", "rm").stream()
+                    .filter(s -> s.startsWith(args[1].toLowerCase()))
                     .collect(Collectors.toList());
         }
         return List.of();
