@@ -28,8 +28,11 @@ import xin.agent.tasks.TaskManager;
 import xin.agent.tools.*;
 
 import java.io.File;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class AgentManager {
+    private static final Logger logger = LoggerFactory.getLogger(AgentManager.class);
     
     public interface BotAgent {
         @SystemMessage({
@@ -56,14 +59,18 @@ public class AgentManager {
 
     private BotAgent agent;
     private TaskManager taskManager;
-    public final java.util.concurrent.atomic.AtomicBoolean isProcessing = new java.util.concurrent.atomic.AtomicBoolean(false);
+    public final java.util.concurrent.atomic.AtomicReference<Thread> processingThread = new java.util.concurrent.atomic.AtomicReference<>(null);
 
     public AgentManager() {
         this.taskManager = new TaskManager();
         initAgent();
     }
 
-    private void initAgent() {
+    public boolean isProcessing() {
+        return processingThread.get() != null;
+    }
+
+    public void initAgent() {
         var builder = OpenAiChatModel.builder()
                 .apiKey(PluginConfig.apiKey)
                 .modelName(PluginConfig.modelName);
@@ -99,21 +106,43 @@ public class AgentManager {
                 .build();
     }
 
+    public java.util.concurrent.Future<?> currentAgentTask = null;
+
+    public void interruptProcessing() {
+        Thread t = processingThread.get();
+        if (t != null) {
+            t.interrupt();
+            // Wait for thread to clear its state or we forcefully set it after a timeout if needed,
+            // but usually setting it to null immediately is better so the new task can proceed.
+            processingThread.compareAndSet(t, null);
+        }
+        
+        if (currentAgentTask != null && !currentAgentTask.isDone()) {
+            currentAgentTask.cancel(true);
+            currentAgentTask = null;
+        }
+    }
+
     public String processMessage(String message) {
         if (this.agent == null) return "Agent is not initialized.";
         
         // Prevent overlapping message processing
-        if (!isProcessing.compareAndSet(false, true)) {
+        Thread current = Thread.currentThread();
+        if (!processingThread.compareAndSet(null, current)) {
             return "我现在正在思考上一条指令，请稍后再试！";
         }
         
         try {
             return this.agent.chat(message);
         } catch (Exception e) {
+            if (current.isInterrupted() || e.getCause() instanceof InterruptedException || e.toString().contains("interrupted")) {
+                logger.info("AI processing was interrupted.");
+                return ""; // 被打断时返回空字符串，不输出错误
+            }
             e.printStackTrace();
             return "Agent error: " + e.getMessage();
         } finally {
-            isProcessing.set(false);
+            processingThread.compareAndSet(current, null);
         }
     }
 

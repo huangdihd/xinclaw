@@ -85,9 +85,11 @@ public class AgentCommandExecutor extends CommandExecutor {
         String message = String.join(" ", args);
         logger.info("Sending to agent: {}", message);
         
-        if (XinAgentPlugin.Instance.agentManager != null && XinAgentPlugin.Instance.agentManager.isProcessing.get()) {
-            Bot.Instance.sendChatMessage("我现在正在思考，请稍后再发送指令！");
-            return;
+        if (XinAgentPlugin.Instance.agentManager != null && XinAgentPlugin.Instance.agentManager.isProcessing()) {
+            Bot.Instance.sendChatMessage("已打断AI当前的思考，开始处理新指令...");
+            XinAgentPlugin.Instance.agentManager.interruptProcessing();
+            // 等待一小会儿让旧线程退出
+            try { Thread.sleep(100); } catch (InterruptedException ignored) {}
         }
 
         // 使用托管的线程池执行任务
@@ -95,9 +97,10 @@ public class AgentCommandExecutor extends CommandExecutor {
             return;
         }
 
-        XinAgentPlugin.Instance.executorService.submit(() -> {
+        XinAgentPlugin.Instance.agentManager.currentAgentTask = XinAgentPlugin.Instance.executorService.submit(() -> {
             try {
                 String response = XinAgentPlugin.Instance.agentManager.processMessage(message);
+                if (response == null || response.isEmpty()) return;
                 logger.info("Agent reply: {}", response);
                 
                 String[] lines = response.split("\\n");

@@ -103,7 +103,7 @@ public class XinAgentPlugin implements Plugin {
             try {
                 if (agentManager == null || agentManager.getTaskManager() == null) return;
                 if (!Bot.Instance.isRunning()) return;
-                if (agentManager.isProcessing.get()) return;
+                if (agentManager.isProcessing()) return;
 
                 List<Task> tasks = agentManager.getTaskManager().getTasks();
                 boolean hasInProgress = tasks.stream().anyMatch(t -> t.getStatus() == Task.Status.IN_PROGRESS);

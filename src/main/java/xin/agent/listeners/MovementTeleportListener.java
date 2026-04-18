@@ -39,7 +39,7 @@ public class MovementTeleportListener implements Listener {
                 
                 if (XinAgentPlugin.Instance.executorService != null && !XinAgentPlugin.Instance.executorService.isShutdown()) {
                     XinAgentPlugin.Instance.executorService.submit(() -> {
-                        if (XinAgentPlugin.Instance.agentManager != null && !XinAgentPlugin.Instance.agentManager.isProcessing.get()) {
+                        if (XinAgentPlugin.Instance.agentManager != null && !XinAgentPlugin.Instance.agentManager.isProcessing()) {
                             String msg = String.format("[SYSTEM_EVENT] 服务器将你传送(或拉回)到了坐标: (%.1f, %.1f, %.1f)。如果这是你主动发起的，请忽略；如果是在寻路中发生，可能是因为卡在方块里或触发了2b2t的反作弊拉回(Rubberband)，请检查是否需要停下(stopWalking)或破坏障碍物。", pos.x, pos.y, pos.z);
                             String response = XinAgentPlugin.Instance.agentManager.processMessage(msg);
                             if (response != null && !response.trim().isEmpty()) {
