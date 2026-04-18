@@ -54,7 +54,12 @@ public class PrivateMessageListener implements Listener {
         }
 
         logger.info("Received private message from owner {}: {}", senderName, message);
-        
+
+        if (XinAgentPlugin.Instance.agentManager != null && XinAgentPlugin.Instance.agentManager.isProcessing.get()) {
+            sendInChunks(senderName, "我现在正在思考，请稍后再发送指令！");
+            return;
+        }
+
         // 使用托管的线程池执行任务
         if (XinAgentPlugin.Instance.executorService == null || XinAgentPlugin.Instance.executorService.isShutdown()) {
             return;
