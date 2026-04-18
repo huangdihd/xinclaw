@@ -28,8 +28,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.List;
-import xin.agent.commands.AgentCommand;
-import xin.agent.commands.AgentCommandExecutor;
+import xin.agent.commands.*;
 import xin.agent.listeners.PrivateMessageListener;
 import xin.agent.trackers.DimensionTracker;
 import xin.agent.trackers.InventoryTracker;
@@ -94,7 +93,9 @@ public class XinAgentPlugin implements Plugin {
             logger.info("MovementTeleportListener initialized.");
             
             Bot.Instance.getPluginManager().registerCommand(new AgentCommand(), new AgentCommandExecutor(), this);
-            logger.info("Agent command registered.");
+            Bot.Instance.getPluginManager().registerCommand(new AgentTaskCommand(), new AgentTaskCommandExecutor(), this);
+            Bot.Instance.getPluginManager().registerCommand(new AgentClearCommand(), new AgentClearCommandExecutor(), this);
+            logger.info("Agent commands registered.");
 
             // 启动自主任务循环：每 15 秒检查一次
             startTaskLoop();

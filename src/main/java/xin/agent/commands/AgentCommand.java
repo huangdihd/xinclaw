@@ -38,6 +38,6 @@ public class AgentCommand extends Command {
 
     @Override
     public String getUsage() {
-        return "agent <message> | agent task [list|add|rm] | agent clear";
+        return "agent <message>";
     }
 }
