@@ -118,9 +118,13 @@ public class XinAgentPlugin implements Plugin {
                     
                     String statusContext = "";
                     if (MovementSync.Instance != null) {
-                        org.joml.Vector3i goal = MovementSync.Instance.getActiveGoal();
                         boolean isMoving = MovementSync.Instance.getMovementController().getCurrentMovement() != null;
-                        
+                        if (isMoving) {
+                            // 如果正在进行任何移动 (寻路、walkTo等)，直接跳过本次循环，绝对不打扰 AI，节省 Token
+                            return;
+                        }
+
+                        org.joml.Vector3i goal = MovementSync.Instance.getActiveGoal();
                         if (goal != null) {
                             org.joml.Vector3d currentPos = MovementSync.Instance.position.get();
                             double dist = currentPos.distance(new org.joml.Vector3d(goal.x + 0.5, goal.y, goal.z + 0.5));
@@ -138,11 +142,11 @@ public class XinAgentPlugin implements Plugin {
                                 } else {
                                     statusContext = String.format("\n[状态提示] 机器人已成功到达寻路目标 (%d, %d, %d)！请执行下一步操作，如果该步骤的任务已完成，请记得 updateTaskStatus。", goal.x, goal.y, goal.z);
                                 }
-                            } else if (!isMoving) {
-                                statusContext = String.format("\n[状态提示] 你当前设定了寻路目标 (%d, %d, %d)，但机器人目前处于静止状态 (距离 %.1f 格)。这通常意味着路径被完全堵死或目标不可达，请尝试重新规划路径或先挖掘周围障碍物。", goal.x, goal.y, goal.z, dist);
                             } else {
-                                // 如果正在移动，则跳过本次循环，不打扰 AI，减少频繁调用
-                                return;
+                                // 静止但未到达目标 (意味着卡死在路上了)
+                                MovementSync.Instance.setActiveGoal(null);
+                                MovementSync.Instance.getMovementController().cancelAll();
+                                statusContext = String.format("\n[状态提示] 寻路已强制中断！你设定了前往 (%d, %d, %d) 的目标，但机器人目前被完全卡住静止 (距离目标还有 %.1f 格)。为防止死循环，系统已自动取消该次寻路。请务必检查周围环境(方块)，必要时挖掘障碍物、搭桥或换个坐标重新寻路。", goal.x, goal.y, goal.z, dist);
                             }
                         }
                     }
