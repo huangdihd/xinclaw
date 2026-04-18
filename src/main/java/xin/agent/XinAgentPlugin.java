@@ -103,6 +103,7 @@ public class XinAgentPlugin implements Plugin {
             try {
                 if (agentManager == null || agentManager.getTaskManager() == null) return;
                 if (!Bot.Instance.isRunning()) return;
+                if (agentManager.isProcessing.get()) return;
 
                 List<Task> tasks = agentManager.getTaskManager().getTasks();
                 boolean hasInProgress = tasks.stream().anyMatch(t -> t.getStatus() == Task.Status.IN_PROGRESS);
@@ -150,7 +151,7 @@ public class XinAgentPlugin implements Plugin {
             } catch (Exception e) {
                 logger.error("Error in task loop", e);
             }
-        }, 30, 60, TimeUnit.SECONDS); // 启动后延迟 30 秒开始，每 60 秒运行一次
+        }, 30, 15, TimeUnit.SECONDS); // 启动后延迟 30 秒开始，每 15 秒运行一次
     }
 
     @Override

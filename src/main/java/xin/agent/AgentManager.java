@@ -56,6 +56,7 @@ public class AgentManager {
 
     private BotAgent agent;
     private TaskManager taskManager;
+    public final java.util.concurrent.atomic.AtomicBoolean isProcessing = new java.util.concurrent.atomic.AtomicBoolean(false);
 
     public AgentManager() {
         this.taskManager = new TaskManager();
@@ -100,11 +101,19 @@ public class AgentManager {
 
     public String processMessage(String message) {
         if (this.agent == null) return "Agent is not initialized.";
+        
+        // Prevent overlapping message processing
+        if (!isProcessing.compareAndSet(false, true)) {
+            return "我现在正在思考上一条指令，请稍后再试！";
+        }
+        
         try {
             return this.agent.chat(message);
         } catch (Exception e) {
             e.printStackTrace();
             return "Agent error: " + e.getMessage();
+        } finally {
+            isProcessing.set(false);
         }
     }
 
