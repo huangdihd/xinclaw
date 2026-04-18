@@ -40,7 +40,7 @@ public class MovementTeleportListener implements Listener {
                 if (XinAgentPlugin.Instance.executorService != null && !XinAgentPlugin.Instance.executorService.isShutdown()) {
                     XinAgentPlugin.Instance.executorService.submit(() -> {
                         if (XinAgentPlugin.Instance.agentManager != null && !XinAgentPlugin.Instance.agentManager.isProcessing()) {
-                            String msg = String.format("[SYSTEM_EVENT] 服务器将你传送(或拉回)到了坐标: (%.1f, %.1f, %.1f)。如果这是你主动发起的，请忽略；如果是在寻路中发生，可能是因为卡在方块里或触发了2b2t的反作弊拉回(Rubberband)，请检查是否需要停下(stopWalking)或破坏障碍物。", pos.x, pos.y, pos.z);
+                            String msg = String.format("[SYSTEM_EVENT] 服务器将你传送(或拉回)到了坐标: (%.1f, %.1f, %.1f)。可能的原因包括：你刚刚复活、使用了传送指令、或者在寻路中卡在方块里被服务器拉回。如果是在寻路中被卡住，请检查是否需要停下(stopWalking)或破坏周围的障碍物。", pos.x, pos.y, pos.z);
                             String response = XinAgentPlugin.Instance.agentManager.processMessage(msg);
                             if (response != null && !response.trim().isEmpty()) {
                                 logger.info("[Teleport Event] AI 思考结果: {}", response);
