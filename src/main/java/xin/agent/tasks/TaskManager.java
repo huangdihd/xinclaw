@@ -43,6 +43,11 @@ public class TaskManager {
         return removed;
     }
 
+    public void clearTasks() {
+        tasks.clear();
+        save();
+    }
+
     public boolean updateTaskStatus(String id, Task.Status status) {
         for (Task t : tasks) {
             if (t.getId().equalsIgnoreCase(id)) {

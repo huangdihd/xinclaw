@@ -20,6 +20,6 @@ public class AgentTaskCommand extends Command {
 
     @Override
     public String getUsage() {
-        return "agenttask [list|add <desc>|rm <id>]";
+        return "agenttask [list|add <desc>|rm <id>|clear]";
     }
 }

@@ -86,7 +86,7 @@ public class MovementTools {
         return "机器人已执行跳跃。";
     }
 
-    @Tool("在移动任务队列中添加一段等待时间（不执行任何移动）。当你需要机器人停在原地等待一会儿再执行下一个动作时使用。")
+    @Tool("在移动队列中添加等待时间。仅用于连续动作之间(如:走->等->挖)。请勿将此工具作为你的最终决策，如果你当前无事可做，直接在对话中回复玩家即可，切勿循环调用此工具！")
     public String addIdleMovement(@P("等待的持续时间（毫秒）") long durationMs) {
         logger.info("[AI Tool Call] 调用了 addIdleMovement(ms={})", durationMs);
         if (MovementSync.Instance == null || MovementSync.Instance.movementController == null) {

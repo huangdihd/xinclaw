@@ -14,7 +14,7 @@ import xin.agent.tasks.Task;
 
 public class AgentTaskCommandExecutor extends CommandExecutor {
     private static final Logger logger = LoggerFactory.getLogger(AgentTaskCommandExecutor.class);
-    private static final List<String> SUB_COMMANDS = List.of("list", "add", "rm");
+    private static final List<String> SUB_COMMANDS = List.of("list", "add", "rm", "clear");
 
     @Override
     public void onCommand(Command command, String label, String[] args) {
@@ -45,6 +45,9 @@ public class AgentTaskCommandExecutor extends CommandExecutor {
             } else {
                 logger.info("Task not found: {}", id);
             }
+        } else if (args.length >= 1 && args[0].equalsIgnoreCase("clear")) {
+            XinAgentPlugin.Instance.agentManager.getTaskManager().clearTasks();
+            logger.info("All tasks have been cleared.");
         } else {
             logger.info("Usage: " + command.getUsage());
         }
@@ -56,6 +59,13 @@ public class AgentTaskCommandExecutor extends CommandExecutor {
             return SUB_COMMANDS.stream()
                     .filter(s -> s.startsWith(args[0].toLowerCase()))
                     .collect(Collectors.toList());
+        } else if (args.length == 2 && args[0].equalsIgnoreCase("rm")) {
+            if (XinAgentPlugin.Instance != null && XinAgentPlugin.Instance.agentManager != null) {
+                return XinAgentPlugin.Instance.agentManager.getTaskManager().getTasks().stream()
+                        .map(Task::getId)
+                        .filter(id -> id.toLowerCase().startsWith(args[1].toLowerCase()))
+                        .collect(Collectors.toList());
+            }
         }
         return List.of();
     }
