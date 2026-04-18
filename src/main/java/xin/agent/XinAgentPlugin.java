@@ -120,12 +120,8 @@ public class XinAgentPlugin implements Plugin {
                     String statusContext = "";
                     if (MovementSync.Instance != null) {
                         boolean isMoving = MovementSync.Instance.getMovementController().getCurrentMovement() != null;
-                        if (isMoving) {
-                            // 如果正在进行任何移动 (寻路、walkTo等)，直接跳过本次循环，绝对不打扰 AI，节省 Token
-                            return;
-                        }
-
                         org.joml.Vector3i goal = MovementSync.Instance.getActiveGoal();
+                        
                         if (goal != null) {
                             org.joml.Vector3d currentPos = MovementSync.Instance.position.get();
                             double dist = currentPos.distance(new org.joml.Vector3d(goal.x + 0.5, goal.y, goal.z + 0.5));
@@ -143,12 +139,16 @@ public class XinAgentPlugin implements Plugin {
                                 } else {
                                     statusContext = String.format("\n[状态提示] 机器人已成功到达寻路目标 (%d, %d, %d)！请执行下一步操作，如果该步骤的任务已完成，请记得 updateTaskStatus。", goal.x, goal.y, goal.z);
                                 }
-                            } else {
+                            } else if (!isMoving) {
                                 // 静止但未到达目标 (意味着卡死在路上了)
                                 MovementSync.Instance.setActiveGoal(null);
                                 MovementSync.Instance.getMovementController().cancelAll();
                                 statusContext = String.format("\n[状态提示] 寻路已强制中断！你设定了前往 (%d, %d, %d) 的目标，但机器人目前被完全卡住静止 (距离目标还有 %.1f 格)。为防止死循环，系统已自动取消该次寻路。请务必检查周围环境(方块)，必要时挖掘障碍物、搭桥或换个坐标重新寻路。", goal.x, goal.y, goal.z, dist);
+                            } else {
+                                statusContext = String.format("\n[状态提示] 机器人目前正在向寻路目标 (%d, %d, %d) 移动中，当前距离目标还有 %.1f 格。你可以通过 stopWalking 随时打断寻路，或查阅其它工具。如果不打算打断移动，请仅简短回复正在路上即可。", goal.x, goal.y, goal.z, dist);
                             }
+                        } else if (isMoving) {
+                            statusContext = "\n[状态提示] 机器人目前正在进行物理移动，你如果想中止可以调用 stopWalking。";
                         }
                     }
 
