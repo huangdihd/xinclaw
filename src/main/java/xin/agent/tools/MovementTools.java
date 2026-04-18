@@ -141,4 +141,34 @@ public class MovementTools {
         MovementSync.Instance.movementController.cancelAll();
         return "已成功停止所有的寻路和移动任务。";
     }
+
+    @Tool("获取机器人当前的移动和寻路状态。当你不知道自己是不是在跑图、想知道当前目标坐标、或者想确认自己是不是被卡住时调用。")
+    public String getMovementStatus() {
+        logger.info("[AI Tool Call] 调用了 getMovementStatus()");
+        if (MovementSync.Instance == null) return "MovementSync 插件未就绪。";
+        
+        StringBuilder status = new StringBuilder();
+        
+        org.joml.Vector3i goal = MovementSync.Instance.getActiveGoal();
+        if (goal != null) {
+            status.append(String.format("当前有活跃的寻路目标: (%d, %d, %d)。", goal.x, goal.y, goal.z));
+        } else {
+            status.append("当前没有活跃的寻路目标。");
+        }
+        
+        if (MovementSync.Instance.movementController != null) {
+            xin.bbtt.movement.Movement current = MovementSync.Instance.movementController.getCurrentMovement();
+            if (current != null) {
+                status.append("\n机器人目前正在执行物理移动或挖块动作 (").append(current.getClass().getSimpleName()).append(")。");
+            } else {
+                status.append("\n机器人目前处于静止状态(或正在等待下一个动作)。");
+            }
+        }
+        
+        if (xin.agent.XinAgentPlugin.Instance != null && xin.agent.XinAgentPlugin.Instance.currentMovementTaskId != null) {
+            status.append("\n当前移动系统正在为任务ID [").append(xin.agent.XinAgentPlugin.Instance.currentMovementTaskId).append("] 服务。");
+        }
+        
+        return status.toString();
+    }
 }
