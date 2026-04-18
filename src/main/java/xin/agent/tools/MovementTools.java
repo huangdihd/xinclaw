@@ -96,12 +96,13 @@ public class MovementTools {
         return "已在任务队列中添加了 " + durationMs + " 毫秒的等待时间。";
     }
 
-    @Tool("智能动态寻路到指定的绝对坐标点 x, y, z。会自动绕过障碍物、自动开路(挖方块)或搭桥。大约每秒移动 3-4 格。")
+    @Tool("智能动态寻路到指定的绝对坐标点 x, y, z。会自动绕过障碍物、自动开路(挖方块)或搭桥。如果传入了taskId，当到达目标时该任务会自动被标记为 DONE。大约每秒移动 3-4 格。")
     public String pathfindTo(
             @P("目标 X 坐标") double x,
             @P("目标 Y 坐标") double y,
-            @P("目标 Z 坐标") double z) {
-        logger.info("[AI Tool Call] 调用了 pathfindTo(x={}, y={}, z={})", x, y, z);
+            @P("目标 Z 坐标") double z,
+            @P("绑定的任务ID (可选，填入对应的任务ID可以在到达目标后系统自动将其标记为 DONE，留空则不绑定)") String taskId) {
+        logger.info("[AI Tool Call] 调用了 pathfindTo(x={}, y={}, z={}, taskId={})", x, y, z, taskId);
         if (MovementSync.Instance == null || MovementSync.Instance.movementController == null) {
             return "MovementSync 插件尚未就绪，无法移动。";
         }
@@ -122,6 +123,11 @@ public class MovementTools {
         org.joml.Vector3i targetPos = new org.joml.Vector3i((int) Math.floor(x), (int) Math.floor(y), (int) Math.floor(z));
         MovementSync.Instance.setActiveGoal(targetPos);
         MovementSync.Instance.triggerAutoRepath();
+        
+        // 绑定任务
+        if (taskId != null && !taskId.trim().isEmpty() && xin.agent.XinAgentPlugin.Instance != null) {
+            xin.agent.XinAgentPlugin.Instance.currentMovementTaskId = taskId.trim();
+        }
 
         return String.format("已启动内置寻路引擎，寻路成功（包含 %d 个节点），开始前往坐标 (%.2f, %.2f, %.2f)。机器人会自动处理障碍物。", path.size(), x, y, z);
     }

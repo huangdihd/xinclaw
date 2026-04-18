@@ -32,15 +32,34 @@ import java.util.Map;
 public class PerceptionTools {
     private static final Logger logger = LoggerFactory.getLogger(PerceptionTools.class);
 
-    @Tool("获取当前机器人的位置坐标和所在的服务器。当需要知道自己在哪里时调用。")
+    @Tool("获取当前机器人的位置坐标、所在的服务器以及朝向。当需要知道自己在哪里和面朝哪个方向时调用。")
     public String whereAmI() {
         logger.info("[AI Tool Call] 调用了 whereAmI()");
         if (MovementSync.Instance == null || Bot.Instance == null) {
             return "插件或Bot实例未初始化。";
         }
         Vector3d position = new Vector3d(MovementSync.Instance.position.get());
-        return String.format("当前服务器: %s, 坐标: x=%.2f, y=%.2f, z=%.2f",
-                Bot.Instance.getServer(), position.x, position.y, position.z);
+        float yaw = MovementSync.Instance.yaw.get();
+        float pitch = MovementSync.Instance.pitch.get();
+        
+        float normalizedYaw = yaw % 360;
+        if (normalizedYaw < 0) {
+            normalizedYaw += 360;
+        }
+        String facing;
+        if (normalizedYaw >= 315 || normalizedYaw < 45) {
+            facing = "南(South, +Z)";
+        } else if (normalizedYaw >= 45 && normalizedYaw < 135) {
+            facing = "西(West, -X)";
+        } else if (normalizedYaw >= 135 && normalizedYaw < 225) {
+            facing = "北(North, -Z)";
+        } else {
+            facing = "东(East, +X)";
+        }
+        String pitchDir = pitch < -45 ? "向上看" : (pitch > 45 ? "向下看" : "平视");
+
+        return String.format("当前服务器: %s, 坐标: x=%.2f, y=%.2f, z=%.2f, 朝向: %s, 视角: %s (Yaw: %.1f, Pitch: %.1f)",
+                Bot.Instance.getServer(), position.x, position.y, position.z, facing, pitchDir, yaw, pitch);
     }
 
     @Tool("获取机器人当前所在的服务器或世界名称。")

@@ -35,15 +35,13 @@ import org.slf4j.LoggerFactory;
 import xin.bbtt.mcbot.Bot;
 import xin.bbtt.MovementSync;
 import xin.agent.XinAgentPlugin;
+import xin.bbtt.movements.DigBlockMovement;
 
 public class ActionTools {
     private static final Logger logger = LoggerFactory.getLogger(ActionTools.class);
 
     private int getLatestSequence() {
-        if (Bot.Instance != null) {
-            return Bot.Instance.getAndIncreaseSequence();
-        }
-        return 0;
+        return Bot.Instance.getAndIncreaseSequence();
     }
 
     @Tool("与指定的实体(玩家、动物、怪物等)进行交互。可以用于攻击(ATTACK)或者右键交互(INTERACT，如骑马、与村民交易、打开箱子矿车等)。")
@@ -51,7 +49,6 @@ public class ActionTools {
             @P("实体的 ID (可以通过 getNearbyEntities 获取)") int entityId,
             @P("交互动作，可选值: INTERACT (右键交互), ATTACK (左键攻击)") String actionStr) {
         logger.info("[AI Tool Call] interactEntity(id={}, action={})", entityId, actionStr);
-        if (Bot.Instance == null) return "Bot实例未初始化。";
 
         InteractAction action;
         try {
@@ -82,7 +79,6 @@ public class ActionTools {
     @Tool("切换机器人的主手快捷栏物品(0-8)。")
     public String changeSlot(@P("快捷栏槽位编号 (0-8)") int slot) {
         logger.info("[AI Tool Call] changeSlot(slot={})", slot);
-        if (Bot.Instance == null) return "Bot实例未初始化。";
         if (slot < 0 || slot > 8) return "槽位必须在0-8之间。";
         Bot.Instance.getSession().send(new ServerboundSetCarriedItemPacket(slot));
         return "已切换到槽位 " + slot;
@@ -91,7 +87,6 @@ public class ActionTools {
     @Tool("使用手中的物品（右键点击一次）。")
     public String useItem() {
         logger.info("[AI Tool Call] useItem()");
-        if (Bot.Instance == null) return "Bot实例未初始化。";
 
         int sequence = getLatestSequence();
         
@@ -124,7 +119,7 @@ public class ActionTools {
             XinAgentPlugin.Instance.executorService.submit(() -> {
                 try {
                     Thread.sleep(durationMs);
-                    if (Bot.Instance != null && Bot.Instance.getSession() != null) {
+                    if (Bot.Instance.getSession() != null) {
                         Bot.Instance.getSession().send(new ServerboundPlayerActionPacket(
                                 PlayerAction.RELEASE_USE_ITEM,
                                 Vector3i.ZERO,
@@ -141,7 +136,6 @@ public class ActionTools {
     @Tool("松开使用物品的按键。")
     public String releaseUseItem() {
         logger.info("[AI Tool Call] releaseUseItem()");
-        if (Bot.Instance == null) return "Bot实例未初始化。";
         Bot.Instance.getSession().send(new ServerboundPlayerActionPacket(PlayerAction.RELEASE_USE_ITEM, Vector3i.ZERO, Direction.DOWN, getLatestSequence()));
         return "已松开物品。";
     }
@@ -151,7 +145,6 @@ public class ActionTools {
             @P("X") int x, @P("Y") int y, @P("Z") int z,
             @P("面: DOWN, UP, NORTH, SOUTH, WEST, EAST") String directionStr) {
         logger.info("[AI Tool Call] interactBlock({}, {}, {}, {})", x, y, z, directionStr);
-        if (Bot.Instance == null) return "Bot实例未初始化。";
 
         Direction direction;
         try {
@@ -188,17 +181,12 @@ public class ActionTools {
         logger.info("[AI Tool Call] mineBlock({}, {}, {})", x, y, z);
         if (Bot.Instance == null) return "Bot实例未初始化。";
 
-        MovementSync.Instance.lookAt(new org.joml.Vector3d(x + 0.5, y + 0.5, z + 0.5));
-        
-        // Swing hand
-        Bot.Instance.getSession().send(new ServerboundSwingPacket(Hand.MAIN_HAND));
+        Vector3i posInt = Vector3i.from(x, y, z);
+        org.joml.Vector3d posDouble = new org.joml.Vector3d(x + 0.5, y + 0.5, z + 0.5);
 
-        int seq = getLatestSequence();
-        Vector3i pos = Vector3i.from(x, y, z);
-        Bot.Instance.getSession().send(new ServerboundPlayerActionPacket(PlayerAction.START_DIGGING, pos, Direction.UP, seq));
-        
-        // We might need a small delay here for realistic digging, but for creative/instant:
-        Bot.Instance.getSession().send(new ServerboundPlayerActionPacket(PlayerAction.FINISH_DIGGING, pos, Direction.UP, seq));
+        MovementSync.Instance.lookAt(posDouble);
+
+        MovementSync.Instance.getMovementController().addMovement(new DigBlockMovement(posInt));
         
         return "已尝试挖掘坐标 (" + x + ", " + y + ", " + z + ")";
     }

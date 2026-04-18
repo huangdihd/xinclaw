@@ -44,6 +44,9 @@ public class XinAgentPlugin implements Plugin {
     public DimensionTracker dimensionTracker;
     public ExecutorService executorService;
     private ScheduledExecutorService scheduler;
+    
+    // 用于将任务系统与寻路系统融合
+    public String currentMovementTaskId = null;
 
     public XinAgentPlugin() {
     }
@@ -113,10 +116,27 @@ public class XinAgentPlugin implements Plugin {
                         boolean isMoving = MovementSync.Instance.getMovementController().getCurrentMovement() != null;
                         
                         if (goal != null) {
-                            if (!isMoving) {
-                                statusContext = String.format("\n[状态提示] 你当前设定了寻路目标 (%d, %d, %d)，但机器人目前处于静止状态。这通常意味着路径被完全堵死或目标不可达，请尝试重新规划路径或先挖掘周围障碍物。", goal.x, goal.y, goal.z);
+                            org.joml.Vector3d currentPos = MovementSync.Instance.position.get();
+                            double dist = currentPos.distance(new org.joml.Vector3d(goal.x + 0.5, goal.y, goal.z + 0.5));
+                            
+                            if (dist < 2.0) {
+                                // 到达目标
+                                MovementSync.Instance.setActiveGoal(null);
+                                MovementSync.Instance.getMovementController().cancelAll();
+                                
+                                // 自动融合任务系统：如果绑定了任务，则自动标记为完成
+                                if (currentMovementTaskId != null && agentManager != null && agentManager.getTaskManager() != null) {
+                                    agentManager.getTaskManager().updateTaskStatus(currentMovementTaskId, Task.Status.DONE);
+                                    statusContext = String.format("\n[状态提示] 机器人已成功到达寻路目标 (%d, %d, %d)！系统已自动将对应的任务(ID: %s)标记为 DONE。请检查环境并执行下一步操作。", goal.x, goal.y, goal.z, currentMovementTaskId);
+                                    currentMovementTaskId = null; // 清除
+                                } else {
+                                    statusContext = String.format("\n[状态提示] 机器人已成功到达寻路目标 (%d, %d, %d)！请执行下一步操作，如果该步骤的任务已完成，请记得 updateTaskStatus。", goal.x, goal.y, goal.z);
+                                }
+                            } else if (!isMoving) {
+                                statusContext = String.format("\n[状态提示] 你当前设定了寻路目标 (%d, %d, %d)，但机器人目前处于静止状态 (距离 %.1f 格)。这通常意味着路径被完全堵死或目标不可达，请尝试重新规划路径或先挖掘周围障碍物。", goal.x, goal.y, goal.z, dist);
                             } else {
-                                statusContext = String.format("\n[状态提示] 机器人正在寻路前往 (%d, %d, %d)。", goal.x, goal.y, goal.z);
+                                // 如果正在移动，则跳过本次循环，不打扰 AI，减少频繁调用
+                                return;
                             }
                         }
                     }
@@ -130,7 +150,7 @@ public class XinAgentPlugin implements Plugin {
             } catch (Exception e) {
                 logger.error("Error in task loop", e);
             }
-        }, 30, 15, TimeUnit.SECONDS); // 启动后延迟 30 秒开始，每 15 秒运行一次
+        }, 30, 60, TimeUnit.SECONDS); // 启动后延迟 30 秒开始，每 60 秒运行一次
     }
 
     @Override

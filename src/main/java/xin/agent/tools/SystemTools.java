@@ -32,6 +32,13 @@ public class SystemTools {
     public String sendChatMessage(@P("你要发送的文本内容") String message) {
         logger.info("[AI Tool Call] 调用了 sendChatMessage(message='{}')", message);
         if (Bot.Instance == null) return "Bot实例未初始化。";
+        
+        // 检测疑似坐标泄露 (包含连续或相近的数字组合，特别是带有负号或小数的)
+        if (message.matches(".*?-?\\d{2,}[\\s,]+-?\\d{1,}[\\s,]+-?\\d{2,}.*")) {
+            logger.warn("检测到可能泄露坐标的消息，已拦截: {}", message);
+            return "发送失败：系统检测到消息中包含疑似坐标信息。2b2t严禁泄露坐标，请修改你的消息！";
+        }
+        
         sendChatMessageInChunks(message);
         return "消息已成功分段发送至游戏内聊天框。";
     }
