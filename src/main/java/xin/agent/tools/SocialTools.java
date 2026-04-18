@@ -38,6 +38,19 @@ public class SocialTools {
         return "机器人的主人是: " + (owner == null ? "未设置" : owner);
     }
 
+    @Tool("获取最近接收到的公共聊天或系统广播消息(通常包含服务器通知或玩家发言)。")
+    public String getRecentChat(@P("需要读取的最近行数，最大100") int lines) {
+        logger.info("[AI Tool Call] 调用了 getRecentChat(lines={})", lines);
+        if (xin.agent.XinAgentPlugin.Instance == null || xin.agent.XinAgentPlugin.Instance.chatTracker == null) {
+            return "聊天记录器未初始化。";
+        }
+        java.util.List<String> messages = xin.agent.XinAgentPlugin.Instance.chatTracker.getRecentMessages(lines);
+        if (messages.isEmpty()) {
+            return "最近没有收到任何聊天消息。";
+        }
+        return "最近的 " + messages.size() + " 条聊天消息：\n" + String.join("\n", messages);
+    }
+
     @Tool("获取当前服务器在线的玩家列表。")
     public String getPlayerList() {
         logger.info("[AI Tool Call] 调用了 getPlayerList()");
