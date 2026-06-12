@@ -1,0 +1,31 @@
+agent:
+  executor: "xin.claw.commands.AgentCommandExecutor"
+  aliases:
+    - "ai"
+    - "bot"
+  description: "Chat with the Langchain4j AI Agent"
+  usage: "agent <message>"
+
+agenttask:
+  executor: "xin.claw.commands.AgentTaskCommandExecutor"
+  aliases:
+    - "aitask"
+    - "bottask"
+  description: "Manage AI Agent tasks"
+  usage: "agenttask [list|add <desc>|rm <id>|clear]"
+
+agentclear:
+  executor: "xin.claw.commands.AgentClearCommandExecutor"
+  aliases:
+    - "aiclear"
+    - "botclear"
+  description: "Clear AI Agent memory"
+  usage: "agentclear"
+
+agentmodel:
+  executor: "xin.claw.commands.AgentModelCommandExecutor"
+  aliases:
+    - "aimodel"
+    - "botmodel"
+  description: "Switch the AI model or list available models"
+  usage: "agentmodel [<model_name>|list]"

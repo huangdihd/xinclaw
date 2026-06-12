@@ -1,0 +1,6 @@
+name: XinClaw
+main: xin.claw.XinClawPlugin
+version: ${project.version}
+type: PLUGIN
+depend:
+  - MovementSync

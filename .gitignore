@@ -9,3 +9,4 @@ data/
 *.log
 config.properties
 chat-memory.json
+.DS_Store

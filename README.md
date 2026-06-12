@@ -31,9 +31,9 @@
    mvn clean package
    ```
 2. **部署**：
-   将 `target/XinAgentPlugin-1.0-SNAPSHOT-shaded.jar` 放入 Xinbot 的 `plugins` 文件夹。
+   将 `target/XinClaw-1.0-SNAPSHOT.jar` 放入 Xinbot 的 `plugins` 文件夹。
 3. **初始化配置**：
-   首次启动机器人后，插件会自动在 `plugins/XinAgent/` 目录下生成 `config.properties`。
+   首次启动机器人后，插件会自动在 `plugins/XinClaw/` 目录下生成 `config.properties`（旧版本的 `plugins/XinAgent/` 数据目录会被自动迁移）。
 4. **填入 API Key**：
    编辑生成的配置文件，填入你的 OpenAI 或兼容平台（如硅基流动）的 API 信息。
 
@@ -48,13 +48,23 @@ api_base_url=https://api.openai.com/v1
 model_name=gpt-4o-mini
 # 开启思考过程（视模型支持情况而定）
 enable_thinking=false
+# 发送给模型的记忆窗口条数（<=0 表示不限制，不建议）
+max_memory_messages=150
+# 自主任务循环的检查间隔（秒，最小 5）
+task_loop_interval_seconds=15
+# 血量低于该值且仍在下降时主动唤醒 AI 避险（0-20）
+low_health_threshold=10.0
+# 私聊屏蔽词（逗号分隔，完全匹配时忽略该条私聊）
+private_message_blacklist=back,help
 ```
 
 ## 🎮 指令使用
 
 - **控制台指令**：
-  - `ai <消息>`：与 AI 进行对话（回复仅显示在控制台）。
-  - `ai clear`：清除 AI 的所有历史记忆。
+  - `agent <消息>`（别名 `ai`、`bot`）：与 AI 进行对话。
+  - `agenttask [list|add <描述>|rm <id>|clear]`（别名 `aitask`）：管理 AI 的任务列表。
+  - `agentclear`（别名 `aiclear`）：清除 AI 的所有历史记忆。
+  - `agentmodel [<模型名>|list]`（别名 `aimodel`）：切换 AI 模型或列出 API 提供的模型，Tab 补全自动拉取模型列表。
 - **游戏内私聊**：
   - 由 Owner 发送私聊给机器人，机器人将自动回复。
 
