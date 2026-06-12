@@ -155,8 +155,18 @@ public class XinClawPlugin implements Plugin {
                         statusContext += "\n[体征] " + healthTracker.getVitalsSummary();
                     }
 
+                    // 直接附上未完成任务清单(含ID)，免去 AI 再调 listTasks，也避免它因不记得 ID 而跳过改状态
+                    String pendingTasks = tasks.stream()
+                            .filter(t -> t.getStatus() != Task.Status.DONE)
+                            .map(Task::toString)
+                            .collect(java.util.stream.Collectors.joining("\n"));
+
                     // 发送背景提示，让 AI 决定下一步动作
-                    String response = agentManager.processMessage("[SYSTEM_TICK] 你当前有正在进行的任务。请检查环境并执行必要的工具调用以继续完成任务。如果你已经完成，请更新任务状态。" + statusContext);
+                    String response = agentManager.processMessage(
+                            "[SYSTEM_TICK] 你有正在进行中的任务。当前未完成任务清单:\n" + pendingTasks
+                            + "\n请先逐一核对：上面每个 IN_PROGRESS 的任务是否其实已经达成？凡是已达成的，必须现在就调用 updateTaskStatus 将其标记为 DONE"
+                            + "（否则系统会每隔 " + PluginConfig.taskLoopIntervalSeconds + " 秒重复唤醒你执行它，浪费算力）。"
+                            + "核对完后再继续执行尚未完成的任务。" + statusContext);
                     if (response != null && !response.trim().isEmpty()) {
                         logger.info("[TaskLoop] AI 思考结果: {}", response);
                     }
