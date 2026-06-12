@@ -96,6 +96,9 @@ public class XinClawPlugin implements Plugin {
             Bot.INSTANCE.getPluginManager().events().registerEvents(new xin.claw.listeners.MovementTeleportListener(), this);
             logger.info("MovementTeleportListener initialized.");
 
+            Bot.INSTANCE.getPluginManager().events().registerEvents(new xin.claw.listeners.DeathListener(), this);
+            logger.info("DeathListener initialized.");
+
             // 启动自主任务循环（间隔可通过 task_loop_interval_seconds 配置）
             startTaskLoop();
         } catch (Throwable e) {

@@ -111,7 +111,9 @@ public class AgentManager {
                 .build();
     }
 
-    public java.util.concurrent.Future<?> currentAgentTask = null;
+    private volatile java.util.concurrent.Future<?> currentAgentTask = null;
+    private final Object submitLock = new Object();
+    private final java.util.concurrent.atomic.AtomicLong submissionSeq = new java.util.concurrent.atomic.AtomicLong();
 
     /**
      * 打断当前正在进行的处理（如有），并在插件托管线程池中异步处理消息。
@@ -121,42 +123,61 @@ public class AgentManager {
      * @param onReply     收到非空回复时回调
      */
     public void submitMessage(String message, Runnable onInterrupt, java.util.function.Consumer<String> onReply) {
-        if (isProcessing()) {
-            if (onInterrupt != null) onInterrupt.run();
-            interruptProcessing();
-            // 等待一小会儿让旧线程退出
-            try { Thread.sleep(100); } catch (InterruptedException ignored) {}
-        }
-
         java.util.concurrent.ExecutorService executor =
                 XinClawPlugin.INSTANCE != null ? XinClawPlugin.INSTANCE.executorService : null;
         if (executor == null || executor.isShutdown()) {
             return;
         }
 
-        currentAgentTask = executor.submit(() -> {
-            try {
-                String response = processMessage(message);
-                if (response == null || response.isEmpty()) return;
-                onReply.accept(response);
-            } catch (Exception e) {
-                logger.error("Error while chatting with agent", e);
+        // 整个"打断旧会话→提交新会话"的流程放到线程池里并用锁串行化：
+        // 既不阻塞事件线程（打断等待最长 5 秒），也避免多个触发源同时提交导致并发会话
+        executor.submit(() -> {
+            synchronized (submitLock) {
+                if (isProcessing() && onInterrupt != null) onInterrupt.run();
+                interruptProcessing();
+
+                if (executor.isShutdown()) return;
+                final long seq = submissionSeq.incrementAndGet();
+                currentAgentTask = executor.submit(() -> {
+                    // 启动前确认自己仍是最新一条消息，被更新的提交取代时直接放弃
+                    if (submissionSeq.get() != seq) return;
+                    try {
+                        String response = processMessage(message);
+                        if (response == null || response.isEmpty()) return;
+                        onReply.accept(response);
+                    } catch (Exception e) {
+                        logger.error("Error while chatting with agent", e);
+                    }
+                });
             }
         });
     }
 
     public void interruptProcessing() {
-        Thread t = processingThread.get();
-        if (t != null) {
-            t.interrupt();
-            // Wait for thread to clear its state or we forcefully set it after a timeout if needed,
-            // but usually setting it to null immediately is better so the new task can proceed.
-            processingThread.compareAndSet(t, null);
+        // 先取消尚未开始执行的排队任务，防止等待旧线程期间它又启动新会话
+        java.util.concurrent.Future<?> task = currentAgentTask;
+        currentAgentTask = null;
+        if (task != null && !task.isDone()) {
+            task.cancel(true);
         }
-        
-        if (currentAgentTask != null && !currentAgentTask.isDone()) {
-            currentAgentTask.cancel(true);
-            currentAgentTask = null;
+
+        Thread t = processingThread.get();
+        if (t == null) return;
+        t.interrupt();
+        // 等待旧线程自行退出 agent.chat() 并在 finally 中释放槽位。
+        // 不能立即清空槽位：interrupt 对进行中的 HTTP 请求/工具调用不一定立刻生效，
+        // 提前放行会让新旧两个会话并发写同一份对话记忆，产生残缺的工具调用序列。
+        long deadline = System.currentTimeMillis() + 5000;
+        while (processingThread.get() == t && System.currentTimeMillis() < deadline) {
+            try {
+                Thread.sleep(50);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
+        if (processingThread.compareAndSet(t, null)) {
+            logger.warn("AI 处理线程在 5 秒内未响应中断，已强制释放处理槽位，旧会话可能仍在后台短暂运行。");
         }
     }
 
