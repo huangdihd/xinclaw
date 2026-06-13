@@ -10,3 +10,4 @@ data/
 config.properties
 chat-memory.json
 .DS_Store
+.codegraph/
