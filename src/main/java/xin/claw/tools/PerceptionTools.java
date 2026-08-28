@@ -253,7 +253,7 @@ public class PerceptionTools {
         return sb.toString();
     }
 
-    @Tool("生成以任意绝对坐标为中心的俯视分层字符地图。适合在 searchVoxelRegion 返回的语义候选区域内检查墙体、入口和内部布局，而不要求机器人先移动到那里。方向: 上=北(-Z)，下=南(+Z)，左=西(-X)，右=东(+X)。")
+    @Tool("生成以任意绝对坐标为中心的俯视分层字符地图，不会移动机器人。普通地图分析任务可用于查看指定区域。对于『寻找并前往目标』的 CLMCP 导航任务，到达前不得用本工具远程重新判断候选的结构类别；应先 pathfindToBounds 到达候选，再用本工具局部检查墙体、入口和内部布局。方向: 上=北(-Z)，下=南(+Z)，左=西(-X)，右=东(+X)。")
     public String getAreaMapAt(
             @P("地图中心 X 绝对坐标") int centerX,
             @P("地图中心 Y 绝对坐标") int centerY,
