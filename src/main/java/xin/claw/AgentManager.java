@@ -23,6 +23,7 @@ import dev.langchain4j.model.chat.ChatLanguageModel;
 import dev.langchain4j.model.openai.OpenAiChatModel;
 import dev.langchain4j.service.AiServices;
 import dev.langchain4j.service.SystemMessage;
+import java.time.Duration;
 import xin.claw.memory.PersistentChatMemoryStore;
 import xin.claw.tasks.TaskManager;
 import xin.claw.tools.*;
@@ -88,7 +89,8 @@ public class AgentManager {
     public synchronized void initAgent() {
         var builder = OpenAiChatModel.builder()
                 .apiKey(PluginConfig.apiKey)
-                .modelName(PluginConfig.modelName);
+                .modelName(PluginConfig.modelName)
+                .timeout(configuredApiTimeout());
 
         if (PluginConfig.apiBaseUrl != null && !PluginConfig.apiBaseUrl.trim().isEmpty()) {
             builder.baseUrl(PluginConfig.apiBaseUrl.trim());
@@ -112,6 +114,10 @@ public class AgentManager {
                 .chatMemory(chatMemory)
                 .tools(toolRegistry.snapshot().toArray())
                 .build();
+    }
+
+    static Duration configuredApiTimeout() {
+        return Duration.ofSeconds(Math.max(10, PluginConfig.apiTimeoutSeconds));
     }
 
     /** Register a tool supplied by another XinBot plugin and rebuild the AI service. */

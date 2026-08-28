@@ -32,6 +32,8 @@ public class PluginConfig {
     public static String apiBaseUrl = "";
     public static String modelName = "gpt-4o-mini";
     public static boolean enableThinking = false;
+    /** 单次模型 API 请求超时（秒）。 */
+    public static int apiTimeoutSeconds = 180;
     public static java.util.Set<String> privateMessageBlacklist = new java.util.HashSet<>();
     /** 聊天记忆保留的最大消息条数，<=0 表示不限制（不建议，会导致 token 无限增长） */
     public static int maxMemoryMessages = 150;
@@ -99,6 +101,7 @@ public class PluginConfig {
 
                 try {
                     maxMemoryMessages = Integer.parseInt(props.getProperty("max_memory_messages", String.valueOf(maxMemoryMessages)).trim());
+                    apiTimeoutSeconds = Integer.parseInt(props.getProperty("api_timeout_seconds", String.valueOf(apiTimeoutSeconds)).trim());
                     taskLoopIntervalSeconds = Integer.parseInt(props.getProperty("task_loop_interval_seconds", String.valueOf(taskLoopIntervalSeconds)).trim());
                     lowHealthThreshold = Float.parseFloat(props.getProperty("low_health_threshold", String.valueOf(lowHealthThreshold)).trim());
                 } catch (NumberFormatException e) {
@@ -107,6 +110,10 @@ public class PluginConfig {
                 if (taskLoopIntervalSeconds < 5) {
                     logger.warn("task_loop_interval_seconds={} 过小，已强制设为 5 秒，防止 API 调用过于频繁", taskLoopIntervalSeconds);
                     taskLoopIntervalSeconds = 5;
+                }
+                if (apiTimeoutSeconds < 10) {
+                    logger.warn("api_timeout_seconds={} 过小，已强制设为 10 秒", apiTimeoutSeconds);
+                    apiTimeoutSeconds = 10;
                 }
 
                 String blacklistStr = props.getProperty("private_message_blacklist", "");
@@ -126,6 +133,7 @@ public class PluginConfig {
             props.setProperty("api_base_url", apiBaseUrl);
             props.setProperty("model_name", modelName);
             props.setProperty("enable_thinking", String.valueOf(enableThinking));
+            props.setProperty("api_timeout_seconds", String.valueOf(apiTimeoutSeconds));
             props.setProperty("private_message_blacklist", "back,help");
             props.setProperty("max_memory_messages", String.valueOf(maxMemoryMessages));
             props.setProperty("task_loop_interval_seconds", String.valueOf(taskLoopIntervalSeconds));
