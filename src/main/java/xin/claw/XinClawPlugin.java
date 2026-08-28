@@ -44,11 +44,20 @@ public class XinClawPlugin implements Plugin {
     public xin.claw.trackers.HealthTracker healthTracker;
     public ExecutorService executorService;
     private ScheduledExecutorService scheduler;
+    private volatile boolean teleportAgentNotificationsSuppressed;
     
     // 用于将任务系统与寻路系统融合
     public String currentMovementTaskId = null;
 
     public XinClawPlugin() {
+    }
+
+    public boolean isTeleportAgentNotificationsSuppressed() {
+        return teleportAgentNotificationsSuppressed;
+    }
+
+    public void setTeleportAgentNotificationsSuppressed(boolean suppressed) {
+        teleportAgentNotificationsSuppressed = suppressed;
     }
 
     @Override
