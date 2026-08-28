@@ -28,6 +28,7 @@ import xin.bbtt.movements.ActionMovement;
 import xin.bbtt.pathfinding.DStarLite;
 import xin.bbtt.pathfinding.Node;
 import java.util.List;
+import java.util.Optional;
 
 public class MovementTools {
     private static final Logger logger = LoggerFactory.getLogger(MovementTools.class);
@@ -130,6 +131,126 @@ public class MovementTools {
         }
 
         return String.format("已启动内置寻路引擎，寻路成功（包含 %d 个节点），开始前往坐标 (%.2f, %.2f, %.2f)。机器人会自动处理障碍物。", path.size(), x, y, z);
+    }
+
+    @Tool("在指定绝对坐标半开区间 [min,max) 内寻找距机器人最近且可通过寻路抵达的站立点。站立点要求脚部和头部可通行、脚下为实体方块。适合把 searchVoxelRegion 返回的语义 bounds 转成具体导航坐标；不会移动机器人。")
+    public String findReachablePointInBounds(
+            @P("最小 X，包含") int minX,
+            @P("最小 Y，包含") int minY,
+            @P("最小 Z，包含") int minZ,
+            @P("最大 X，不包含") int maxXExclusive,
+            @P("最大 Y，不包含") int maxYExclusive,
+            @P("最大 Z，不包含") int maxZExclusive) {
+        logger.info(
+            "[AI Tool Call] 调用了 findReachablePointInBounds(bounds=[({},{},{})-({},{},{})])",
+            minX, minY, minZ, maxXExclusive, maxYExclusive, maxZExclusive
+        );
+        if (MovementSync.INSTANCE == null || MovementSync.INSTANCE.getWorld() == null) {
+            return "MovementSync 世界尚未就绪，无法检查区域可达点。";
+        }
+        try {
+            Optional<RegionPathPlanner.Result> result = findRegionTarget(
+                minX, minY, minZ, maxXExclusive, maxYExclusive, maxZExclusive
+            );
+            if (result.isEmpty()) {
+                return "在指定半开区间内没有找到可通过寻路抵达的站立点。可缩小 bounds 或先移动到候选区域附近。";
+            }
+            RegionPathPlanner.Result target = result.get();
+            return String.format(
+                "找到可达站立点 (%d,%d,%d)，预计路径%d个节点；区域内共有%d个站立候选，检查了%d个候选。可将该坐标交给 pathfindTo，或直接调用 pathfindToBounds。",
+                target.target().x, target.target().y, target.target().z,
+                target.pathLength(), target.standableCandidates(), target.probedCandidates()
+            );
+        } catch (IllegalArgumentException error) {
+            return "无效 bounds：" + error.getMessage();
+        }
+    }
+
+    @Tool("智能寻路到指定绝对坐标半开区间 [min,max) 内最近的可达站立点。用于把 searchVoxelRegion 返回的语义 bounds 直接变成移动目标，不删除或替代原有 pathfindTo。")
+    public String pathfindToBounds(
+            @P("最小 X，包含") int minX,
+            @P("最小 Y，包含") int minY,
+            @P("最小 Z，包含") int minZ,
+            @P("最大 X，不包含") int maxXExclusive,
+            @P("最大 Y，不包含") int maxYExclusive,
+            @P("最大 Z，不包含") int maxZExclusive,
+            @P("绑定的任务ID；不绑定时传空字符串") String taskId) {
+        logger.info(
+            "[AI Tool Call] 调用了 pathfindToBounds(bounds=[({},{},{})-({},{},{})], taskId={})",
+            minX, minY, minZ, maxXExclusive, maxYExclusive, maxZExclusive, taskId
+        );
+        if (MovementSync.INSTANCE == null || MovementSync.INSTANCE.getWorld() == null
+            || MovementSync.INSTANCE.movementController == null) {
+            return "MovementSync 插件尚未就绪，无法进行区域寻路。";
+        }
+        try {
+            Optional<RegionPathPlanner.Result> result = findRegionTarget(
+                minX, minY, minZ, maxXExclusive, maxYExclusive, maxZExclusive
+            );
+            if (result.isEmpty()) {
+                return "区域寻路失败：bounds 内没有找到可达站立点。可缩小 bounds 或先向候选区域移动。";
+            }
+            RegionPathPlanner.Result target = result.get();
+            org.joml.Vector3i targetPos = target.target().toVector();
+            MovementSync.INSTANCE.setActiveGoal(targetPos);
+            MovementSync.INSTANCE.triggerAutoRepath();
+            if (taskId != null && !taskId.trim().isEmpty() && xin.claw.XinClawPlugin.INSTANCE != null) {
+                xin.claw.XinClawPlugin.INSTANCE.currentMovementTaskId = taskId.trim();
+            }
+            return String.format(
+                "已从 bounds 中选择可达站立点 (%d,%d,%d)，预检查路径%d个节点，并启动内置寻路引擎。",
+                target.target().x, target.target().y, target.target().z, target.pathLength()
+            );
+        } catch (IllegalArgumentException error) {
+            return "无效 bounds：" + error.getMessage();
+        }
+    }
+
+    private Optional<RegionPathPlanner.Result> findRegionTarget(
+            int minX, int minY, int minZ,
+            int maxXExclusive, int maxYExclusive, int maxZExclusive) {
+        Vector3d currentPosition = MovementSync.INSTANCE.position.get();
+        if (currentPosition == null) return Optional.empty();
+        Node start = new Node(
+            (int) Math.floor(currentPosition.x),
+            (int) Math.floor(currentPosition.y),
+            (int) Math.floor(currentPosition.z)
+        );
+        RegionPathPlanner.Bounds bounds = new RegionPathPlanner.Bounds(
+            minX, minY, minZ, maxXExclusive, maxYExclusive, maxZExclusive
+        );
+        return RegionPathPlanner.findNearestReachable(
+            start,
+            bounds,
+            (x, y, z) -> {
+                try {
+                    return MovementSync.INSTANCE.getWorld().getBlockStateAt(new Vector3d(x, y, z));
+                } catch (Exception error) {
+                    return null;
+                }
+            },
+            (pathStart, goal) -> {
+                DStarLite pathfinder = new DStarLite(pathStart, goal, MovementSync.INSTANCE.getWorld());
+                List<?> candidatePath = pathfinder.findPath(2000);
+                if (candidatePath == null || candidatePath.isEmpty()) return 0;
+                Node endpoint = pathEndpoint(candidatePath);
+                if (!goal.equals(endpoint)) return 0;
+                return candidatePath.size();
+            },
+            64
+        );
+    }
+
+    static Node pathEndpoint(List<?> path) {
+        if (path == null || path.isEmpty()) return null;
+        Object endpoint = path.get(path.size() - 1);
+        if (endpoint instanceof Node node) return node;
+        try {
+            Object node = endpoint.getClass().getMethod("getNode").invoke(endpoint);
+            return node instanceof Node result ? result : null;
+        } catch (ReflectiveOperationException error) {
+            return null;
+        }
     }
 
     @Tool("强制让机器人停止所有移动、寻路行为。当你想要它停下时调用此方法。")

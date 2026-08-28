@@ -16,6 +16,8 @@ final class AgentManagerRegionToolPromptTest {
         assertTrue(prompt.contains("searchVoxelRegion"));
         assertTrue(prompt.contains("findSpecificBlocksInBounds"));
         assertTrue(prompt.contains("getAreaMapAt"));
+        assertTrue(prompt.contains("findReachablePointInBounds"));
+        assertTrue(prompt.contains("pathfindToBounds"));
         assertTrue(prompt.contains("bounds"));
     }
 }
