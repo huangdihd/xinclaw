@@ -60,12 +60,23 @@ public class AgentManager {
 
     private BotAgent agent;
     private TaskManager taskManager;
+    private final AgentToolRegistry toolRegistry;
     private PersistentChatMemoryStore memoryStore;
     public final java.util.concurrent.atomic.AtomicReference<Thread> processingThread = new java.util.concurrent.atomic.AtomicReference<>(null);
     private final java.util.concurrent.atomic.AtomicBoolean memoryClearRequested = new java.util.concurrent.atomic.AtomicBoolean(false);
 
     public AgentManager() {
         this.taskManager = new TaskManager();
+        this.toolRegistry = new AgentToolRegistry(java.util.List.of(
+            new MovementTools(),
+            new PerceptionTools(),
+            new SystemTools(),
+            new SocialTools(),
+            new InventoryTools(),
+            new MemoryTools(),
+            new ActionTools(),
+            new TaskTools(taskManager)
+        ));
         initAgent();
     }
 
@@ -73,7 +84,7 @@ public class AgentManager {
         return processingThread.get() != null;
     }
 
-    public void initAgent() {
+    public synchronized void initAgent() {
         var builder = OpenAiChatModel.builder()
                 .apiKey(PluginConfig.apiKey)
                 .modelName(PluginConfig.modelName);
@@ -98,17 +109,24 @@ public class AgentManager {
         this.agent = AiServices.builder(BotAgent.class)
                 .chatLanguageModel(model)
                 .chatMemory(chatMemory)
-                .tools(
-                    new MovementTools(),
-                    new PerceptionTools(),
-                    new SystemTools(),
-                    new SocialTools(),
-                    new InventoryTools(),
-                    new MemoryTools(),
-                    new ActionTools(),
-                    new TaskTools(taskManager)
-                )
+                .tools(toolRegistry.snapshot().toArray())
                 .build();
+    }
+
+    /** Register a tool supplied by another XinBot plugin and rebuild the AI service. */
+    public synchronized void registerExternalTool(Object tool) {
+        if (isProcessing()) {
+            throw new IllegalStateException("cannot register tools while the agent is processing");
+        }
+        toolRegistry.registerExternal(tool, this::initAgent);
+    }
+
+    /** Remove a previously registered external tool by object identity. */
+    public synchronized void unregisterExternalTool(Object tool) {
+        if (isProcessing()) {
+            throw new IllegalStateException("cannot unregister tools while the agent is processing");
+        }
+        toolRegistry.unregisterExternal(tool, this::initAgent);
     }
 
     private volatile java.util.concurrent.Future<?> currentAgentTask = null;
@@ -182,24 +200,30 @@ public class AgentManager {
     }
 
     public String processMessage(String message) {
-        if (this.agent == null) return "Agent is not initialized.";
-        
         // Ensure the current thread's interrupt flag is cleared before starting, 
         // to prevent thread pool reuse issues causing InterruptedIOException.
         Thread.interrupted();
         
-        // Prevent overlapping message processing
         Thread current = Thread.currentThread();
-        if (!processingThread.compareAndSet(null, current)) {
-            return "我现在正在思考上一条指令，请稍后再试！";
+        BotAgent agentForCall;
+        PersistentChatMemoryStore memoryStoreForCall;
+        // Share the same lifecycle lock as tool registration/rebuild. Once this
+        // slot is acquired, registerExternalTool sees isProcessing()==true.
+        synchronized (this) {
+            if (this.agent == null) return "Agent is not initialized.";
+            if (!processingThread.compareAndSet(null, current)) {
+                return "我现在正在思考上一条指令，请稍后再试！";
+            }
+            agentForCall = this.agent;
+            memoryStoreForCall = this.memoryStore;
         }
 
         try {
             // 此刻确认没有对话在途，安全修复上一轮被打断时可能留下的残缺工具调用序列
-            if (memoryStore != null) {
-                memoryStore.repairConversation("default");
+            if (memoryStoreForCall != null) {
+                memoryStoreForCall.repairConversation("default");
             }
-            return this.agent.chat(message);
+            return agentForCall.chat(message);
         } catch (Exception e) {
             boolean isInterrupted = current.isInterrupted() || e.getCause() instanceof InterruptedException || e.toString().toLowerCase().contains("interrupted");
             if (isInterrupted) {
