@@ -31,7 +31,7 @@ final class PerceptionToolsRegionTest {
         PerceptionTools tools = tools(blocks, new Vector3d(9.5, 64, 20.5));
 
         String result = tools.findSpecificBlocksInBounds(
-            "dark_oak", 10, 63, 19, 12, 66, 22, 20
+            "dark_oak", new int[] {10, 63, 19}, new int[] {12, 66, 22}, 20
         );
 
         assertTrue(result.contains("(10,64,20)"));
@@ -44,10 +44,21 @@ final class PerceptionToolsRegionTest {
         PerceptionTools tools = tools(Map.of(), new Vector3d());
 
         String result = tools.findSpecificBlocksInBounds(
-            "stone", 0, 0, 0, 65, 65, 65, 20
+            "stone", new int[] {0, 0, 0}, new int[] {65, 65, 65}, 20
         );
 
         assertTrue(result.contains("262144"));
+    }
+
+    @Test
+    void rejectsBoundsArraysThatAreNotThreeDimensional() {
+        PerceptionTools tools = tools(Map.of(), new Vector3d());
+
+        String result = tools.findSpecificBlocksInBounds(
+            "stone", new int[] {0, 0}, new int[] {1, 1, 1}, 20
+        );
+
+        assertTrue(result.contains("3个整数"));
     }
 
     @Test

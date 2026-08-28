@@ -544,30 +544,35 @@ public class PerceptionTools {
         return result.toString();
     }
 
-    @Tool("在指定绝对坐标半开区间 [min,max) 内模糊搜索方块名称。用于把 searchVoxelRegion 返回的语义 bounds 直接传给精确方块搜索，在候选建筑内寻找门、楼梯、原木或其他结构特征。不会改成以玩家为中心。")
+    @Tool("在指定绝对坐标半开区间内模糊搜索方块名称。min 与 max_exclusive 必须直接复制 searchVoxelRegion 返回的三整数数组，格式为 min:[x,y,z]、max_exclusive:[x,y,z]，不要拆分或重排坐标。")
     public String findSpecificBlocksInBounds(
             @P("要查找的方块名称或ID片段，如'door', 'stairs', 'dark_oak'") String blockNameQuery,
-            @P("最小 X，包含") int minX,
-            @P("最小 Y，包含") int minY,
-            @P("最小 Z，包含") int minZ,
-            @P("最大 X，不包含") int maxXExclusive,
-            @P("最大 Y，不包含") int maxYExclusive,
-            @P("最大 Z，不包含") int maxZExclusive,
+            @P("最小坐标三整数数组 [x,y,z]，包含；直接复制 searchVoxelRegion.bounds.min") int[] min,
+            @P("最大坐标三整数数组 [x,y,z]，不包含；直接复制 searchVoxelRegion.bounds.max_exclusive") int[] max_exclusive,
             @P("最多返回多少个坐标(1-100，建议30)") int limit) {
-        logger.info(
-            "[AI Tool Call] 调用了 findSpecificBlocksInBounds(query='{}', bounds=[({},{},{})-({},{},{})], limit={})",
-            blockNameQuery, minX, minY, minZ, maxXExclusive, maxYExclusive, maxZExclusive, limit
-        );
-
         if (blockNameQuery == null || blockNameQuery.isBlank()) {
             return "方块名称查询不能为空。";
         }
+        RegionPathPlanner.Bounds bounds;
+        try {
+            bounds = RegionPathPlanner.Bounds.fromArrays(min, max_exclusive);
+        } catch (IllegalArgumentException error) {
+            return "无效 bounds：" + error.getMessage();
+        }
+        int minX = bounds.minX();
+        int minY = bounds.minY();
+        int minZ = bounds.minZ();
+        int maxXExclusive = bounds.maxXExclusive();
+        int maxYExclusive = bounds.maxYExclusive();
+        int maxZExclusive = bounds.maxZExclusive();
+        logger.info(
+            "[AI Tool Call] 调用了 findSpecificBlocksInBounds(query='{}', min=[{},{},{}], max_exclusive=[{},{},{}], limit={})",
+            blockNameQuery, minX, minY, minZ, maxXExclusive, maxYExclusive, maxZExclusive, limit
+        );
+
         long sizeX = (long) maxXExclusive - minX;
         long sizeY = (long) maxYExclusive - minY;
         long sizeZ = (long) maxZExclusive - minZ;
-        if (sizeX <= 0 || sizeY <= 0 || sizeZ <= 0) {
-            return "无效 bounds：每个 maxExclusive 都必须大于对应 min。";
-        }
         long volume = sizeX * sizeY * sizeZ;
         if (volume > 262_144L) {
             return "查询范围过大：半开区间体积不得超过262144个方块。请缩小 bounds。";

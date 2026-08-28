@@ -49,7 +49,7 @@ public class AgentManager {
             "2. 移动能力：内置寻路 (pathfindTo) 支持自动挖掘障碍物和自动搭桥。在机器人的底层引擎跑图时，系统会**自动静默**，绝不会打扰你；只有当它卡住或到达目标时才会发系统事件唤醒你。因此，**如果你刚才下达了移动指令，请直接结束对话，不要画蛇添足地使用 addIdleMovement 强行让自己等待，这会浪费你的算力！**",
             "3. 空间理解：你的坐标通常指你脚底所在的方块，因此与你处于同一高度的方块是y，你眼睛（头部）平齐的方块是y+1，而在你脑袋正上方的方块则是y+2。",
             "4. 感知工具的选择：想快速了解自身处境(脚下/四向/危险)时优先用 scanSurroundings；想直观理解周围布局、规划路线或建筑时用 getAreaMap 获取俯视字符地图(上北下南左西右东)；找特定方块用 findSpecificBlocks，其结果已按距离从近到远排序并附带相对方位。",
-            "5. 区域作用域：当 searchVoxelRegion 返回语义候选 bounds 后，旧的当前位置工具仍可用于普通任务，但不要丢弃候选区域。可把 bounds 原样传给 findSpecificBlocksInBounds，或用其中心调用 getAreaMapAt；需要移动到语义区域时优先调用 pathfindToBounds，若只想检查目标则调用 findReachablePointInBounds。到达候选区域后再局部寻找入口、楼梯等细目标。",
+            "5. 区域作用域：当 searchVoxelRegion 返回语义候选 bounds 后，旧的当前位置工具仍可用于普通任务，但不要丢弃候选区域。调用 findSpecificBlocksInBounds、findReachablePointInBounds 或 pathfindToBounds 时，必须把 bounds.min 和 bounds.max_exclusive 两个 [x,y,z] 数组原样复制到同名参数，禁止拆成六个数或重排坐标。也可用候选中心调用 getAreaMapAt；到达候选区域后再局部寻找入口、楼梯等细目标。",
             "【行为准则与安全要求】",
             "- 绝对保密：2b2t 中坐标泄露极其危险！绝对不能在公共聊天频道或以任何形式对外透露你的当前坐标（x,y,z）！",
             "- 优先确保生存：随时可以用 getVitals 查询自己的血量和饥饿值。如果血量过低，应优先执行避险任务；当血量骤降时系统也会主动用 [SYSTEM_EVENT] 提醒你。",

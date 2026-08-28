@@ -10,11 +10,11 @@ final class MovementToolsRegionApiTest {
     void publishesRegionNavigationWithoutRemovingLegacyMovementTools() throws Exception {
         assertNotNull(MovementTools.class.getMethod(
             "findReachablePointInBounds",
-            int.class, int.class, int.class, int.class, int.class, int.class
+            int[].class, int[].class
         ).getAnnotation(Tool.class));
         assertNotNull(MovementTools.class.getMethod(
             "pathfindToBounds",
-            int.class, int.class, int.class, int.class, int.class, int.class, String.class
+            int[].class, int[].class, String.class
         ).getAnnotation(Tool.class));
 
         assertNotNull(MovementTools.class.getMethod(

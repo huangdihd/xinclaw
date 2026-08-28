@@ -19,6 +19,16 @@ final class RegionPathPlanner {
         int maxYExclusive,
         int maxZExclusive
     ) {
+        static Bounds fromArrays(int[] min, int[] maxExclusive) {
+            if (min == null || maxExclusive == null || min.length != 3 || maxExclusive.length != 3) {
+                throw new IllegalArgumentException("min 和 max_exclusive 必须各包含3个整数");
+            }
+            return new Bounds(
+                min[0], min[1], min[2],
+                maxExclusive[0], maxExclusive[1], maxExclusive[2]
+            );
+        }
+
         Bounds {
             long sizeX = (long) maxXExclusive - minX;
             long sizeY = (long) maxYExclusive - minY;

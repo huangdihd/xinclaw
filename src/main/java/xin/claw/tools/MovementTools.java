@@ -133,25 +133,19 @@ public class MovementTools {
         return String.format("已启动内置寻路引擎，寻路成功（包含 %d 个节点），开始前往坐标 (%.2f, %.2f, %.2f)。机器人会自动处理障碍物。", path.size(), x, y, z);
     }
 
-    @Tool("在指定绝对坐标半开区间 [min,max) 内寻找距机器人最近且可通过寻路抵达的站立点。站立点要求脚部和头部可通行、脚下为实体方块。适合把 searchVoxelRegion 返回的语义 bounds 转成具体导航坐标；不会移动机器人。")
+    @Tool("在指定半开区间内寻找最近可达站立点。min 与 max_exclusive 必须直接复制 searchVoxelRegion 返回的 [x,y,z] 三整数数组，不要拆分或重排。不会移动机器人。")
     public String findReachablePointInBounds(
-            @P("最小 X，包含") int minX,
-            @P("最小 Y，包含") int minY,
-            @P("最小 Z，包含") int minZ,
-            @P("最大 X，不包含") int maxXExclusive,
-            @P("最大 Y，不包含") int maxYExclusive,
-            @P("最大 Z，不包含") int maxZExclusive) {
+            @P("最小坐标 [x,y,z]，直接复制 searchVoxelRegion.bounds.min") int[] min,
+            @P("最大坐标 [x,y,z]，直接复制 searchVoxelRegion.bounds.max_exclusive") int[] max_exclusive) {
         logger.info(
-            "[AI Tool Call] 调用了 findReachablePointInBounds(bounds=[({},{},{})-({},{},{})])",
-            minX, minY, minZ, maxXExclusive, maxYExclusive, maxZExclusive
+            "[AI Tool Call] 调用了 findReachablePointInBounds(min={}, max_exclusive={})",
+            java.util.Arrays.toString(min), java.util.Arrays.toString(max_exclusive)
         );
         if (MovementSync.INSTANCE == null || MovementSync.INSTANCE.getWorld() == null) {
             return "MovementSync 世界尚未就绪，无法检查区域可达点。";
         }
         try {
-            Optional<RegionPathPlanner.Result> result = findRegionTarget(
-                minX, minY, minZ, maxXExclusive, maxYExclusive, maxZExclusive
-            );
+            Optional<RegionPathPlanner.Result> result = findRegionTarget(min, max_exclusive);
             if (result.isEmpty()) {
                 return "在指定半开区间内没有找到可通过寻路抵达的站立点。可缩小 bounds 或先移动到候选区域附近。";
             }
@@ -166,27 +160,21 @@ public class MovementTools {
         }
     }
 
-    @Tool("智能寻路到指定绝对坐标半开区间 [min,max) 内最近的可达站立点。用于把 searchVoxelRegion 返回的语义 bounds 直接变成移动目标，不删除或替代原有 pathfindTo。")
+    @Tool("智能寻路到指定半开区间内最近的可达站立点。min 与 max_exclusive 必须直接复制 searchVoxelRegion 返回的 [x,y,z] 三整数数组，不要拆分或重排；原有 pathfindTo 保持可用。")
     public String pathfindToBounds(
-            @P("最小 X，包含") int minX,
-            @P("最小 Y，包含") int minY,
-            @P("最小 Z，包含") int minZ,
-            @P("最大 X，不包含") int maxXExclusive,
-            @P("最大 Y，不包含") int maxYExclusive,
-            @P("最大 Z，不包含") int maxZExclusive,
+            @P("最小坐标 [x,y,z]，直接复制 searchVoxelRegion.bounds.min") int[] min,
+            @P("最大坐标 [x,y,z]，直接复制 searchVoxelRegion.bounds.max_exclusive") int[] max_exclusive,
             @P("绑定的任务ID；不绑定时传空字符串") String taskId) {
         logger.info(
-            "[AI Tool Call] 调用了 pathfindToBounds(bounds=[({},{},{})-({},{},{})], taskId={})",
-            minX, minY, minZ, maxXExclusive, maxYExclusive, maxZExclusive, taskId
+            "[AI Tool Call] 调用了 pathfindToBounds(min={}, max_exclusive={}, taskId={})",
+            java.util.Arrays.toString(min), java.util.Arrays.toString(max_exclusive), taskId
         );
         if (MovementSync.INSTANCE == null || MovementSync.INSTANCE.getWorld() == null
             || MovementSync.INSTANCE.movementController == null) {
             return "MovementSync 插件尚未就绪，无法进行区域寻路。";
         }
         try {
-            Optional<RegionPathPlanner.Result> result = findRegionTarget(
-                minX, minY, minZ, maxXExclusive, maxYExclusive, maxZExclusive
-            );
+            Optional<RegionPathPlanner.Result> result = findRegionTarget(min, max_exclusive);
             if (result.isEmpty()) {
                 return "区域寻路失败：bounds 内没有找到可达站立点。可缩小 bounds 或先向候选区域移动。";
             }
@@ -206,9 +194,7 @@ public class MovementTools {
         }
     }
 
-    private Optional<RegionPathPlanner.Result> findRegionTarget(
-            int minX, int minY, int minZ,
-            int maxXExclusive, int maxYExclusive, int maxZExclusive) {
+    private Optional<RegionPathPlanner.Result> findRegionTarget(int[] min, int[] maxExclusive) {
         Vector3d currentPosition = MovementSync.INSTANCE.position.get();
         if (currentPosition == null) return Optional.empty();
         Node start = new Node(
@@ -216,9 +202,7 @@ public class MovementTools {
             (int) Math.floor(currentPosition.y),
             (int) Math.floor(currentPosition.z)
         );
-        RegionPathPlanner.Bounds bounds = new RegionPathPlanner.Bounds(
-            minX, minY, minZ, maxXExclusive, maxYExclusive, maxZExclusive
-        );
+        RegionPathPlanner.Bounds bounds = RegionPathPlanner.Bounds.fromArrays(min, maxExclusive);
         return RegionPathPlanner.findNearestReachable(
             start,
             bounds,
