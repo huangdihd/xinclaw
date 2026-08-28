@@ -27,6 +27,15 @@ import java.nio.charset.StandardCharsets;
 
 public class SystemTools {
     private static final Logger logger = LoggerFactory.getLogger(SystemTools.class);
+    private final boolean commandExecutionEnabled;
+
+    public SystemTools() {
+        this(!Boolean.parseBoolean(System.getenv().getOrDefault("XINCLAW_DISABLE_SEND_COMMAND", "false")));
+    }
+
+    SystemTools(boolean commandExecutionEnabled) {
+        this.commandExecutionEnabled = commandExecutionEnabled;
+    }
 
     @Tool("在游戏内发送聊天消息。这将被服务器内的所有人看到。")
     public String sendChatMessage(@P("你要发送的文本内容") String message) {
@@ -77,6 +86,9 @@ public class SystemTools {
           "- stat <玩家名>: 查询玩家基础信息")
     public String sendCommand(@P("你要执行的指令文本(不带'/')") String command) {
         logger.info("[AI Tool Call] 调用了 sendCommand(command='{}')", command);
+        if (!commandExecutionEnabled) {
+            return "Command execution is disabled for this benchmark.";
+        }
         if (Bot.INSTANCE == null) return "Bot实例未初始化。";
         
         if (command.startsWith("tell ") || command.startsWith("msg ") || command.startsWith("w ")) {
