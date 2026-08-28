@@ -29,18 +29,43 @@ import xin.bbtt.mcbot.Bot;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Objects;
+import java.util.function.Supplier;
 
 public class PerceptionTools {
     private static final Logger logger = LoggerFactory.getLogger(PerceptionTools.class);
 
+    @FunctionalInterface
+    interface BlockStateLookup {
+        BlockState stateAt(int x, int y, int z);
+    }
+
+    private final BlockStateLookup blockStateLookup;
+    private final Supplier<Vector3d> positionLookup;
+
+    public PerceptionTools() {
+        this(
+            (x, y, z) -> {
+                try {
+                    if (MovementSync.INSTANCE == null || MovementSync.INSTANCE.getWorld() == null) return null;
+                    int stateId = MovementSync.INSTANCE.getWorld().getBlockAt(new Vector3d(x, y, z));
+                    return BlockStateParser.Instance.parseStateId(stateId);
+                } catch (Exception error) {
+                    return null;
+                }
+            },
+            () -> MovementSync.INSTANCE == null ? null : MovementSync.INSTANCE.position.get()
+        );
+    }
+
+    PerceptionTools(BlockStateLookup blockStateLookup, Supplier<Vector3d> positionLookup) {
+        this.blockStateLookup = Objects.requireNonNull(blockStateLookup, "blockStateLookup");
+        this.positionLookup = Objects.requireNonNull(positionLookup, "positionLookup");
+    }
+
     /** 解析指定坐标的方块状态，区块未加载或状态未知时返回 null。 */
     private BlockState stateAt(int x, int y, int z) {
-        try {
-            int stateId = MovementSync.INSTANCE.getWorld().getBlockAt(new Vector3d(x, y, z));
-            return BlockStateParser.Instance.parseStateId(stateId);
-        } catch (Exception e) {
-            return null;
-        }
+        return blockStateLookup.stateAt(x, y, z);
     }
 
     private String blockNameAt(int x, int y, int z) {
@@ -218,6 +243,84 @@ public class PerceptionTools {
         }
 
         sb.append("图例: @=你 .=可通行 ~=水 !=岩浆 ?=未加载");
+        if (legend.containsValue('#')) sb.append(" #=其他方块");
+        sb.append("\n");
+        for (Map.Entry<String, Character> entry : legend.entrySet()) {
+            if (entry.getValue() != '#') {
+                sb.append(entry.getValue()).append("=").append(entry.getKey()).append(" ");
+            }
+        }
+        return sb.toString();
+    }
+
+    @Tool("生成以任意绝对坐标为中心的俯视分层字符地图。适合在 searchVoxelRegion 返回的语义候选区域内检查墙体、入口和内部布局，而不要求机器人先移动到那里。方向: 上=北(-Z)，下=南(+Z)，左=西(-X)，右=东(+X)。")
+    public String getAreaMapAt(
+            @P("地图中心 X 绝对坐标") int centerX,
+            @P("地图中心 Y 绝对坐标") int centerY,
+            @P("地图中心 Z 绝对坐标") int centerZ,
+            @P("水平半径(2-16，建议5-10)") int radius,
+            @P("起始层相对中心Y的偏移") int yFrom,
+            @P("结束层相对中心Y的偏移，最多显示5层") int yTo) {
+        logger.info(
+            "[AI Tool Call] 调用了 getAreaMapAt(center=({},{},{}), radius={}, yFrom={}, yTo={})",
+            centerX, centerY, centerZ, radius, yFrom, yTo
+        );
+
+        int r = Math.max(2, Math.min(16, radius));
+        if (yFrom > yTo) { int tmp = yFrom; yFrom = yTo; yTo = tmp; }
+        yFrom = Math.max(-8, Math.min(8, yFrom));
+        yTo = Math.max(-8, Math.min(8, yTo));
+        if (yTo - yFrom > 4) yTo = yFrom + 4;
+
+        Vector3d player = positionLookup.get();
+        int playerX = player == null ? Integer.MIN_VALUE : (int) Math.floor(player.x);
+        int playerY = player == null ? Integer.MIN_VALUE : (int) Math.floor(player.y);
+        int playerZ = player == null ? Integer.MIN_VALUE : (int) Math.floor(player.z);
+
+        final String letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+        Map<String, Character> legend = new java.util.LinkedHashMap<>();
+        StringBuilder sb = new StringBuilder();
+        sb.append(String.format(
+            "以指定中心(%d, %d, %d)为中心、半径%d的俯视地图。方向: 上=北(-Z) 下=南(+Z) 左=西(-X) 右=东(+X)。\n",
+            centerX, centerY, centerZ, r
+        ));
+
+        for (int dy = yTo; dy >= yFrom; dy--) {
+            int y = centerY + dy;
+            sb.append(String.format("── y=%d (相对中心%+d) ──\n", y, dy));
+            for (int dz = -r; dz <= r; dz++) {
+                for (int dx = -r; dx <= r; dx++) {
+                    int x = centerX + dx;
+                    int z = centerZ + dz;
+                    if (x == playerX && z == playerZ && (y == playerY || y == playerY + 1)) {
+                        sb.append('@');
+                        continue;
+                    }
+                    if (dx == 0 && dz == 0 && dy == 0) {
+                        sb.append('+');
+                        continue;
+                    }
+                    BlockState state = stateAt(x, y, z);
+                    if (state == null) {
+                        sb.append('?');
+                    } else if (state.isLiquid()) {
+                        sb.append(state.blockName().contains("lava") ? '!' : '~');
+                    } else if (state.isPassable()) {
+                        sb.append('.');
+                    } else {
+                        Character symbol = legend.get(state.blockName());
+                        if (symbol == null) {
+                            symbol = legend.size() < letters.length() ? letters.charAt(legend.size()) : '#';
+                            legend.put(state.blockName(), symbol);
+                        }
+                        sb.append(symbol);
+                    }
+                }
+                sb.append('\n');
+            }
+        }
+
+        sb.append("图例: +=指定中心 @=你 .=可通行 ~=水 !=岩浆 ?=未加载");
         if (legend.containsValue('#')) sb.append(" #=其他方块");
         sb.append("\n");
         for (Map.Entry<String, Character> entry : legend.entrySet()) {
@@ -438,6 +541,90 @@ public class PerceptionTools {
             result.append("...其余 ").append(found.size() - shown).append(" 个更远的已省略。");
         }
 
+        return result.toString();
+    }
+
+    @Tool("在指定绝对坐标半开区间 [min,max) 内模糊搜索方块名称。用于把 searchVoxelRegion 返回的语义 bounds 直接传给精确方块搜索，在候选建筑内寻找门、楼梯、原木或其他结构特征。不会改成以玩家为中心。")
+    public String findSpecificBlocksInBounds(
+            @P("要查找的方块名称或ID片段，如'door', 'stairs', 'dark_oak'") String blockNameQuery,
+            @P("最小 X，包含") int minX,
+            @P("最小 Y，包含") int minY,
+            @P("最小 Z，包含") int minZ,
+            @P("最大 X，不包含") int maxXExclusive,
+            @P("最大 Y，不包含") int maxYExclusive,
+            @P("最大 Z，不包含") int maxZExclusive,
+            @P("最多返回多少个坐标(1-100，建议30)") int limit) {
+        logger.info(
+            "[AI Tool Call] 调用了 findSpecificBlocksInBounds(query='{}', bounds=[({},{},{})-({},{},{})], limit={})",
+            blockNameQuery, minX, minY, minZ, maxXExclusive, maxYExclusive, maxZExclusive, limit
+        );
+
+        if (blockNameQuery == null || blockNameQuery.isBlank()) {
+            return "方块名称查询不能为空。";
+        }
+        long sizeX = (long) maxXExclusive - minX;
+        long sizeY = (long) maxYExclusive - minY;
+        long sizeZ = (long) maxZExclusive - minZ;
+        if (sizeX <= 0 || sizeY <= 0 || sizeZ <= 0) {
+            return "无效 bounds：每个 maxExclusive 都必须大于对应 min。";
+        }
+        long volume = sizeX * sizeY * sizeZ;
+        if (volume > 262_144L) {
+            return "查询范围过大：半开区间体积不得超过262144个方块。请缩小 bounds。";
+        }
+
+        Vector3d player = positionLookup.get();
+        Vector3d reference = player == null
+            ? new Vector3d(minX + sizeX / 2.0, minY + sizeY / 2.0, minZ + sizeZ / 2.0)
+            : new Vector3d(player);
+        int referenceX = (int) Math.floor(reference.x);
+        int referenceY = (int) Math.floor(reference.y);
+        int referenceZ = (int) Math.floor(reference.z);
+        int outputLimit = Math.max(1, Math.min(100, limit));
+        String lowerQuery = blockNameQuery.toLowerCase();
+        record FoundBlock(int x, int y, int z, double distance, String name) {}
+        java.util.List<FoundBlock> found = new java.util.ArrayList<>();
+
+        for (int x = minX; x < maxXExclusive; x++) {
+            for (int y = minY; y < maxYExclusive; y++) {
+                for (int z = minZ; z < maxZExclusive; z++) {
+                    BlockState state = stateAt(x, y, z);
+                    if (state == null || state.blockName() == null) continue;
+                    String name = state.blockName();
+                    String lowerName = name.toLowerCase();
+                    if (lowerName.contains(lowerQuery) && !lowerName.contains("air")) {
+                        found.add(new FoundBlock(x, y, z, reference.distance(new Vector3d(x, y, z)), name));
+                    }
+                }
+            }
+        }
+
+        if (found.isEmpty()) {
+            return String.format(
+                "在半开区间 [(%d,%d,%d),(%d,%d,%d)) 内没有找到匹配 '%s' 的方块。",
+                minX, minY, minZ, maxXExclusive, maxYExclusive, maxZExclusive, blockNameQuery
+            );
+        }
+
+        found.sort(java.util.Comparator.comparingDouble(FoundBlock::distance));
+        int shown = Math.min(found.size(), outputLimit);
+        StringBuilder result = new StringBuilder();
+        result.append(String.format(
+            "在半开区间 [(%d,%d,%d),(%d,%d,%d)) 内共找到 %d 个匹配 '%s' 的方块，按距%s从近到远列出前%d个:\n",
+            minX, minY, minZ, maxXExclusive, maxYExclusive, maxZExclusive,
+            found.size(), blockNameQuery, player == null ? "区域中心" : "你", shown
+        ));
+        for (int index = 0; index < shown; index++) {
+            FoundBlock block = found.get(index);
+            result.append(String.format(
+                "- %s (%d,%d,%d) 距离%.1f格 [%s]\n",
+                block.name(), block.x(), block.y(), block.z(), block.distance(),
+                relativeDesc(block.x() - referenceX, block.y() - referenceY, block.z() - referenceZ)
+            ));
+        }
+        if (found.size() > shown) {
+            result.append("...其余 ").append(found.size() - shown).append(" 个已省略。");
+        }
         return result.toString();
     }
 
