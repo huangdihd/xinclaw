@@ -160,6 +160,45 @@ public class MovementTools {
         }
     }
 
+    @Tool({
+        "预览前往指定半开区间内最近可达站立点的真实寻路路线，返回选定目标和寻路节点。",
+        "本工具不会移动机器人：不会设置 activeGoal、不会触发自动重寻路、不会修改移动任务，也不会向移动队列加入动作。",
+        "用于在行动前理解路线从哪一侧接近候选、最后几步落在哪里；若决定执行，再单独调用 pathfindToBounds。min 与 max_exclusive 必须直接复制候选 bounds 的 [x,y,z] 数组。"
+    })
+    public String previewPathToBounds(
+            @P("最小坐标 [x,y,z]，直接复制候选 bounds.min") int[] min,
+            @P("最大坐标 [x,y,z]，直接复制候选 bounds.max_exclusive") int[] max_exclusive) {
+        logger.info(
+            "[AI Tool Call] 调用了 previewPathToBounds(min={}, max_exclusive={})",
+            java.util.Arrays.toString(min), java.util.Arrays.toString(max_exclusive)
+        );
+        if (MovementSync.INSTANCE == null || MovementSync.INSTANCE.getWorld() == null) {
+            return "MovementSync 世界尚未就绪，无法预览寻路节点。";
+        }
+        try {
+            Optional<RegionPathPlanner.Result> result = findRegionTarget(min, max_exclusive);
+            if (result.isEmpty()) {
+                return "路径预览失败：bounds 内没有找到可达站立点。不会移动机器人。";
+            }
+            RegionPathPlanner.Result target = result.get();
+            Vector3d position = MovementSync.INSTANCE.position.get();
+            if (position == null) return "路径预览失败：无法获取当前坐标。不会移动机器人。";
+            Node start = new Node(
+                (int) Math.floor(position.x),
+                (int) Math.floor(position.y),
+                (int) Math.floor(position.z)
+            );
+            DStarLite pathfinder = new DStarLite(start, target.target(), MovementSync.INSTANCE.getWorld());
+            List<?> path = pathfinder.findPath(2000);
+            if (path == null || path.isEmpty() || !target.target().equals(pathEndpoint(path))) {
+                return "路径预览失败：世界状态在候选检查后发生变化，无法重建完整路线。不会移动机器人。";
+            }
+            return formatPathPreview(target, path);
+        } catch (IllegalArgumentException error) {
+            return "无效 bounds：" + error.getMessage();
+        }
+    }
+
     @Tool("智能寻路到指定半开区间内最近的可达站立点。min 与 max_exclusive 必须直接复制 searchVoxelRegion 返回的 [x,y,z] 三整数数组，不要拆分或重排；原有 pathfindTo 保持可用。")
     public String pathfindToBounds(
             @P("最小坐标 [x,y,z]，直接复制 searchVoxelRegion.bounds.min") int[] min,
@@ -225,16 +264,62 @@ public class MovementTools {
         );
     }
 
-    static Node pathEndpoint(List<?> path) {
-        if (path == null || path.isEmpty()) return null;
-        Object endpoint = path.get(path.size() - 1);
-        if (endpoint instanceof Node node) return node;
+    static String formatPathPreview(RegionPathPlanner.Result target, List<?> path) {
+        final int maximumShown = 96;
+        final int prefixCount = 16;
+        int omitted = Math.max(0, path.size() - maximumShown);
+        StringBuilder output = new StringBuilder();
+        output.append("路径预览完成；不会移动机器人，也未设置任何导航目标。\n")
+            .append("selected_target=(").append(target.target().x).append(',')
+            .append(target.target().y).append(',').append(target.target().z).append(")")
+            .append(" total_nodes=").append(path.size())
+            .append(" standable_candidates=").append(target.standableCandidates())
+            .append(" probed_candidates=").append(target.probedCandidates()).append("\n")
+            .append("route_nodes=[");
+        for (int index = 0; index < path.size(); index++) {
+            if (omitted > 0 && index == prefixCount) {
+                output.append("... omitted_middle_nodes=").append(omitted).append(" ..., ");
+                index += omitted - 1;
+                continue;
+            }
+            Node node = pathNode(path.get(index));
+            if (node == null) {
+                output.append(index).append(":UNKNOWN");
+            } else {
+                output.append(index).append(':').append(pathTypeName(path.get(index)))
+                    .append("@(").append(node.x).append(',').append(node.y).append(',').append(node.z).append(')');
+            }
+            if (index + 1 < path.size()) output.append(", ");
+        }
+        output.append("]\n")
+            .append("这里只报告当前世界快照下的路线；若要执行，请另行调用 pathfindToBounds。");
+        return output.toString();
+    }
+
+    private static String pathTypeName(Object step) {
+        if (step instanceof Node) return "WALK";
         try {
-            Object node = endpoint.getClass().getMethod("getNode").invoke(endpoint);
+            Object type = step.getClass().getMethod("getType").invoke(step);
+            if (type instanceof Enum<?> value) return value.name();
+            return type == null ? "UNKNOWN" : String.valueOf(type);
+        } catch (ReflectiveOperationException error) {
+            return "UNKNOWN";
+        }
+    }
+
+    private static Node pathNode(Object step) {
+        if (step instanceof Node node) return node;
+        try {
+            Object node = step.getClass().getMethod("getNode").invoke(step);
             return node instanceof Node result ? result : null;
         } catch (ReflectiveOperationException error) {
             return null;
         }
+    }
+
+    static Node pathEndpoint(List<?> path) {
+        if (path == null || path.isEmpty()) return null;
+        return pathNode(path.get(path.size() - 1));
     }
 
     @Tool("强制让机器人停止所有移动、寻路行为。当你想要它停下时调用此方法。")
