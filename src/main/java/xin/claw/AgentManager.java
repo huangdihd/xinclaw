@@ -121,7 +121,7 @@ public class AgentManager {
         if (PluginConfig.apiBaseUrl != null && !PluginConfig.apiBaseUrl.trim().isEmpty()) {
             builder.baseUrl(PluginConfig.apiBaseUrl.trim());
         }
-        return builder.build();
+        return new SingleTerminalStreamingChatLanguageModel(builder.build());
     }
 
     static Duration configuredApiTimeout() {
@@ -279,6 +279,10 @@ public class AgentManager {
         CompletableFuture<String> completed = new CompletableFuture<>();
         stream.onNext(streamedText::append)
             .onComplete(response -> {
+                if (response != null && response.content() != null
+                    && response.content().hasToolExecutionRequests()) {
+                    return;
+                }
                 String finalText = response != null && response.content() != null
                     ? response.content().text()
                     : null;

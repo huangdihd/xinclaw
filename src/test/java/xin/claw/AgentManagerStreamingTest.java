@@ -2,6 +2,7 @@ package xin.claw;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
 import dev.langchain4j.model.output.Response;
@@ -21,7 +22,7 @@ final class AgentManagerStreamingTest {
             TokenStream.class,
             AgentManager.BotAgent.class.getMethod("chat", String.class).getReturnType()
         );
-        assertInstanceOf(OpenAiStreamingChatModel.class, AgentManager.buildStreamingModel());
+        assertInstanceOf(SingleTerminalStreamingChatLanguageModel.class, AgentManager.buildStreamingModel());
     }
 
     @Test
@@ -46,6 +47,14 @@ final class AgentManagerStreamingTest {
         FakeTokenStream stream = new FakeTokenStream(false, true, "final answer");
 
         assertEquals("final answer", AgentManager.collectTokenStream(stream));
+    }
+
+    @Test
+    void ignoresIntermediateCompletionThatStillContainsToolRequests() {
+        assertEquals(
+            "final answer",
+            AgentManager.collectTokenStream(new IntermediateCompletionTokenStream())
+        );
     }
 
     @Test
@@ -141,6 +150,25 @@ final class AgentManagerStreamingTest {
                 onNext.accept("world");
             }
             onComplete.accept(Response.from(AiMessage.from(completionText)));
+        }
+    }
+
+    private static final class IntermediateCompletionTokenStream implements TokenStream {
+        private Consumer<Response<AiMessage>> onComplete = ignored -> {};
+        private Consumer<Throwable> onError = ignored -> {};
+
+        @Override public TokenStream onRetrieved(Consumer<List<Content>> consumer) { return this; }
+        @Override public TokenStream onNext(Consumer<String> consumer) { return this; }
+        @Override public TokenStream onComplete(Consumer<Response<AiMessage>> consumer) { this.onComplete = consumer; return this; }
+        @Override public TokenStream onError(Consumer<Throwable> consumer) { this.onError = consumer; return this; }
+        @Override public TokenStream ignoreErrors() { return this; }
+
+        @Override
+        public void start() {
+            ToolExecutionRequest request = ToolExecutionRequest.builder()
+                .id("call-1").name("whereAmI").arguments("{}").build();
+            onComplete.accept(Response.from(AiMessage.from("planning", List.of(request))));
+            onComplete.accept(Response.from(AiMessage.from("final answer")));
         }
     }
 
