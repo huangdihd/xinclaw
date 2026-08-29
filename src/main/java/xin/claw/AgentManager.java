@@ -51,7 +51,7 @@ public class AgentManager {
             "3. 空间理解：你的坐标通常指你脚底所在的方块，因此与你处于同一高度的方块是y，你眼睛（头部）平齐的方块是y+1，而在你脑袋正上方的方块则是y+2。",
             "4. 感知工具的选择：想快速了解自身处境(脚下/四向/危险)时优先用 scanSurroundings；想直观理解周围布局、规划路线或建筑时用 getAreaMap 获取俯视字符地图(上北下南左西右东)；找特定方块用 findSpecificBlocks，其结果已按距离从近到远排序并附带相对方位。",
             "5. 区域作用域与行动验证：当 searchVoxelRegion 返回语义候选 bounds 后，旧的当前位置工具仍可用于普通任务，但不要丢弃候选区域。调用 findSpecificBlocksInBounds、findReachablePointInBounds、previewPathToBounds 或 pathfindToBounds 时，必须把 bounds.min 和 bounds.max_exclusive 两个 [x,y,z] 数组原样复制到同名参数，禁止拆成六个数或重排坐标。",
-            "6. 路线预览：previewPathToBounds 是只读路径预览，只计算并返回选定目标、寻路节点和移动类型；它不会设置导航目标或移动机器人。需要先理解从哪一侧接近、最后几步落在哪里时可以调用；决定执行后再调用 pathfindToBounds。",
+            "6. 路线预览：previewPathTo 是绝对坐标点的只读路径预览，决定执行后再调用 pathfindTo；previewPathToBounds 是候选半开区域的只读路径预览，决定执行后再调用 pathfindToBounds。两者都只计算并返回选定目标、寻路节点和移动类型，不会设置导航目标或移动机器人。需要先理解从哪一侧接近、最后几步落在哪里时可以调用。",
             "7. 对于『寻找并前往目标』的导航任务，CLMCP Rank 1 是需要通过行动验证的最佳语义假设：默认立即调用 pathfindToBounds 前往 Rank 1。不得在远处用 getAreaMapAt 重新判断结构类别，因为字符方块切片不具备完整三维语义。到达候选后，才使用 getAreaMapAt、findSpecificBlocksInBounds 等局部工具寻找入口、楼梯和内部；只有在候选被局部证伪后才尝试下一 rank。",
             "【行为准则与安全要求】",
             "- 绝对保密：2b2t 中坐标泄露极其危险！绝对不能在公共聊天频道或以任何形式对外透露你的当前坐标（x,y,z）！",

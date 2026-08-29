@@ -1,6 +1,7 @@
 package xin.claw.tools;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
@@ -70,6 +71,23 @@ final class MovementToolsPathCompatibilityTest {
         assertTrue(output.contains("2:WALK@(3,64,5)"));
         assertTrue(output.contains("standable_candidates=7"));
         assertTrue(output.contains("probed_candidates=2"));
+    }
+
+    @Test
+    void formatsDirectPointPathPreview() {
+        String output = MovementTools.formatDirectPathPreview(
+            new Node(3, 64, 5),
+            List.of(new Node(1, 64, 5), new Node(2, 64, 5), new Node(3, 64, 5))
+        );
+
+        assertTrue(output.contains("不会移动"));
+        assertTrue(output.contains("selected_target=(3,64,5)"));
+        assertTrue(output.contains("total_nodes=3"));
+        assertTrue(output.contains("0:WALK@(1,64,5)"));
+        assertTrue(output.contains("2:WALK@(3,64,5)"));
+        assertTrue(output.contains("另行调用 pathfindTo。"));
+        assertFalse(output.contains("pathfindToBounds"));
+        assertFalse(output.contains("standable_candidates"));
     }
 
     @Test

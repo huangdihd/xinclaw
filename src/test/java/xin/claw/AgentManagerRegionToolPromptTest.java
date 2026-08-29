@@ -21,6 +21,7 @@ final class AgentManagerRegionToolPromptTest {
         assertTrue(prompt.contains("getAreaMapAt"));
         assertTrue(prompt.contains("findReachablePointInBounds"));
         assertTrue(prompt.contains("previewPathToBounds"));
+        assertTrue(prompt.contains("previewPathTo 是绝对坐标点的只读路径预览"));
         assertTrue(prompt.contains("只读路径预览"));
         assertTrue(prompt.contains("pathfindToBounds"));
         assertTrue(prompt.contains("max_exclusive"));

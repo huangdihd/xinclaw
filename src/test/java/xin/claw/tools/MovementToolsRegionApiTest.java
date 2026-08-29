@@ -18,6 +18,16 @@ final class MovementToolsRegionApiTest {
             "pathfindToBounds",
             int[].class, int[].class, String.class
         ).getAnnotation(Tool.class));
+        Method previewPoint = MovementTools.class.getMethod(
+            "previewPathTo",
+            double.class, double.class, double.class
+        );
+        Tool previewPointTool = previewPoint.getAnnotation(Tool.class);
+        assertNotNull(previewPointTool);
+        String previewPointDescription = String.join("\n", previewPointTool.value());
+        assertTrue(previewPointDescription.contains("不会移动"));
+        assertTrue(previewPointDescription.contains("绝对坐标"));
+
         Method preview = MovementTools.class.getMethod(
             "previewPathToBounds",
             int[].class, int[].class

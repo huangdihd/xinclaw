@@ -133,6 +133,42 @@ public class MovementTools {
         return String.format("已启动内置寻路引擎，寻路成功（包含 %d 个节点），开始前往坐标 (%.2f, %.2f, %.2f)。机器人会自动处理障碍物。", path.size(), x, y, z);
     }
 
+    @Tool({
+        "预览前往指定绝对坐标点 x,y,z 的真实寻路路线，并返回寻路节点。",
+        "本工具不会移动机器人：不会设置 activeGoal、不会触发自动重寻路、不会修改移动任务，也不会向移动队列加入动作。",
+        "用于在调用 pathfindTo 前查看路线如何接近目标以及最后几步落在哪里；决定执行后再单独调用 pathfindTo。"
+    })
+    public String previewPathTo(
+            @P("目标 X 绝对坐标") double x,
+            @P("目标 Y 绝对坐标") double y,
+            @P("目标 Z 绝对坐标") double z) {
+        logger.info("[AI Tool Call] 调用了 previewPathTo(x={}, y={}, z={})", x, y, z);
+        if (MovementSync.INSTANCE == null || MovementSync.INSTANCE.getWorld() == null) {
+            return "MovementSync 世界尚未就绪，无法预览寻路节点。";
+        }
+        Vector3d position = MovementSync.INSTANCE.position.get();
+        if (position == null) return "路径预览失败：无法获取当前坐标。不会移动机器人。";
+        Node start = new Node(
+            (int) Math.floor(position.x),
+            (int) Math.floor(position.y),
+            (int) Math.floor(position.z)
+        );
+        Node goal = new Node(
+            (int) Math.floor(x),
+            (int) Math.floor(y),
+            (int) Math.floor(z)
+        );
+        DStarLite pathfinder = new DStarLite(start, goal, MovementSync.INSTANCE.getWorld());
+        List<?> path = pathfinder.findPath(2000);
+        if (path == null || path.isEmpty() || !goal.equals(pathEndpoint(path))) {
+            return String.format(
+                "路径预览失败：无法找到前往绝对坐标 (%d,%d,%d) 的完整路线。不会移动机器人。",
+                goal.x, goal.y, goal.z
+            );
+        }
+        return formatDirectPathPreview(goal, path);
+    }
+
     @Tool("在指定半开区间内寻找最近可达站立点。min 与 max_exclusive 必须直接复制 searchVoxelRegion 返回的 [x,y,z] 三整数数组，不要拆分或重排。不会移动机器人。")
     public String findReachablePointInBounds(
             @P("最小坐标 [x,y,z]，直接复制 searchVoxelRegion.bounds.min") int[] min,
@@ -265,17 +301,32 @@ public class MovementTools {
     }
 
     static String formatPathPreview(RegionPathPlanner.Result target, List<?> path) {
-        final int maximumShown = 96;
-        final int prefixCount = 16;
-        int omitted = Math.max(0, path.size() - maximumShown);
         StringBuilder output = new StringBuilder();
         output.append("路径预览完成；不会移动机器人，也未设置任何导航目标。\n")
             .append("selected_target=(").append(target.target().x).append(',')
             .append(target.target().y).append(',').append(target.target().z).append(")")
             .append(" total_nodes=").append(path.size())
             .append(" standable_candidates=").append(target.standableCandidates())
-            .append(" probed_candidates=").append(target.probedCandidates()).append("\n")
-            .append("route_nodes=[");
+            .append(" probed_candidates=").append(target.probedCandidates()).append("\n");
+        appendPathNodes(output, path, "pathfindToBounds");
+        return output.toString();
+    }
+
+    static String formatDirectPathPreview(Node target, List<?> path) {
+        StringBuilder output = new StringBuilder();
+        output.append("路径预览完成；不会移动机器人，也未设置任何导航目标。\n")
+            .append("selected_target=(").append(target.x).append(',')
+            .append(target.y).append(',').append(target.z).append(")")
+            .append(" total_nodes=").append(path.size()).append("\n");
+        appendPathNodes(output, path, "pathfindTo");
+        return output.toString();
+    }
+
+    private static void appendPathNodes(StringBuilder output, List<?> path, String executionTool) {
+        final int maximumShown = 96;
+        final int prefixCount = 16;
+        int omitted = Math.max(0, path.size() - maximumShown);
+        output.append("route_nodes=[");
         for (int index = 0; index < path.size(); index++) {
             if (omitted > 0 && index == prefixCount) {
                 output.append("... omitted_middle_nodes=").append(omitted).append(" ..., ");
@@ -292,8 +343,8 @@ public class MovementTools {
             if (index + 1 < path.size()) output.append(", ");
         }
         output.append("]\n")
-            .append("这里只报告当前世界快照下的路线；若要执行，请另行调用 pathfindToBounds。");
-        return output.toString();
+            .append("这里只报告当前世界快照下的路线；若要执行，请另行调用 ")
+            .append(executionTool).append('。');
     }
 
     private static String pathTypeName(Object step) {
