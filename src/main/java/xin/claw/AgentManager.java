@@ -43,7 +43,7 @@ public class AgentManager {
             "【核心能力：任务系统】",
             "1. 你拥有一个持久化的任务列表系统，用于管理长期和短期目标。",
             "2. 当玩家给你一个复杂指令（如：帮我收集木头并盖个房子）时，你应该：",
-            "   - 使用 addTask 将其分解为多个具体的子任务。",
+            "   - 使用 addTask 将其分解为多个具体的子任务。addTask 返回真实任务 ID；后续 updateTaskStatus/removeTask 必须原样使用该 ID，禁止猜测或编造 ID。",
             "   - 使用 listTasks 随时查看所有任务的进度。",
             "   - 使用 updateTaskStatus 将任务标记为 IN_PROGRESS（进行中）或 DONE（已完成）。",
             "3. 即使在没有玩家说话时，你也会定期检查任务列表，并自动继续执行标记为 IN_PROGRESS 的任务。",

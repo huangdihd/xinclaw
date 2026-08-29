@@ -29,11 +29,14 @@ public class TaskTools {
                 .collect(Collectors.joining("\n"));
     }
 
-    @Tool("添加一个新的长期或短期任务到任务列表。")
+    @Tool("添加一个新的长期或短期任务到任务列表，并返回真实任务 ID。后续调用 updateTaskStatus 或 removeTask 时必须直接使用返回的 ID，禁止猜测 ID。")
     public String addTask(@P("任务的具体描述") String description) {
         logger.info("[AI Tool Call] 调用了 addTask(desc={})", description);
-        taskManager.addTask(description);
-        return "成功添加任务: " + description;
+        Task task = taskManager.addTask(description);
+        return String.format(
+            "成功添加任务 ID: %s (状态: %s) - %s。后续 updateTaskStatus 或 removeTask 必须使用该 ID。",
+            task.getId(), task.getStatus(), task.getDescription()
+        );
     }
 
     @Tool("根据 ID 删除指定的任务。")
