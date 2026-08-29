@@ -135,10 +135,28 @@ public class PersistentChatMemoryStore implements ChatMemoryStore {
         }
     }
 
+    static List<ChatMessage> collapseConsecutiveDuplicateFinalAiMessages(List<ChatMessage> messages) {
+        List<ChatMessage> result = new ArrayList<>(messages.size());
+        AiMessage previousFinal = null;
+        for (ChatMessage message : messages) {
+            if (message instanceof AiMessage ai && !ai.hasToolExecutionRequests()) {
+                if (previousFinal != null && java.util.Objects.equals(previousFinal.text(), ai.text())) {
+                    continue;
+                }
+                previousFinal = ai;
+            } else {
+                previousFinal = null;
+            }
+            result.add(message);
+        }
+        return result;
+    }
+
     @Override
     public void updateMessages(Object memoryId, List<ChatMessage> messages) {
         try {
-            String json = ChatMessageSerializer.messagesToJson(messages);
+            List<ChatMessage> normalized = collapseConsecutiveDuplicateFinalAiMessages(messages);
+            String json = ChatMessageSerializer.messagesToJson(normalized);
             Files.write(filePath, json.getBytes(StandardCharsets.UTF_8));
         } catch (IOException e) {
             logger.error("Failed to update messages in store", e);

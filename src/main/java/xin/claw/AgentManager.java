@@ -19,11 +19,14 @@ package xin.claw;
 
 import dev.langchain4j.memory.ChatMemory;
 import dev.langchain4j.memory.chat.MessageWindowChatMemory;
-import dev.langchain4j.model.chat.ChatLanguageModel;
-import dev.langchain4j.model.openai.OpenAiChatModel;
+import dev.langchain4j.model.chat.StreamingChatLanguageModel;
+import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
 import dev.langchain4j.service.AiServices;
 import dev.langchain4j.service.SystemMessage;
+import dev.langchain4j.service.TokenStream;
 import java.time.Duration;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import xin.claw.memory.PersistentChatMemoryStore;
 import xin.claw.tasks.TaskManager;
 import xin.claw.tools.*;
@@ -59,7 +62,7 @@ public class AgentManager {
             "- 保持进度透明：每当完成一个关键阶段或任务时，主动告知玩家。",
             "- 说话简洁、专业且富有逻辑。"
         })
-        String chat(String message);
+        TokenStream chat(String message);
     }
 
     private BotAgent agent;
@@ -89,16 +92,7 @@ public class AgentManager {
     }
 
     public synchronized void initAgent() {
-        var builder = OpenAiChatModel.builder()
-                .apiKey(PluginConfig.apiKey)
-                .modelName(PluginConfig.modelName)
-                .timeout(configuredApiTimeout());
-
-        if (PluginConfig.apiBaseUrl != null && !PluginConfig.apiBaseUrl.trim().isEmpty()) {
-            builder.baseUrl(PluginConfig.apiBaseUrl.trim());
-        }
-
-        ChatLanguageModel model = builder.build();
+        StreamingChatLanguageModel model = buildStreamingModel();
 
         // Setup persistent chat memory
         String configDir = PluginConfig.getDataDir().getAbsolutePath();
@@ -112,10 +106,22 @@ public class AgentManager {
                 .build();
 
         this.agent = AiServices.builder(BotAgent.class)
-                .chatLanguageModel(model)
+                .streamingChatLanguageModel(model)
                 .chatMemory(chatMemory)
                 .tools(toolRegistry.snapshot().toArray())
                 .build();
+    }
+
+    static StreamingChatLanguageModel buildStreamingModel() {
+        var builder = OpenAiStreamingChatModel.builder()
+                .apiKey(PluginConfig.apiKey)
+                .modelName(PluginConfig.modelName)
+                .timeout(configuredApiTimeout());
+
+        if (PluginConfig.apiBaseUrl != null && !PluginConfig.apiBaseUrl.trim().isEmpty()) {
+            builder.baseUrl(PluginConfig.apiBaseUrl.trim());
+        }
+        return builder.build();
     }
 
     static Duration configuredApiTimeout() {
@@ -191,21 +197,35 @@ public class AgentManager {
         Thread t = processingThread.get();
         if (t == null) return;
         t.interrupt();
-        // 等待旧线程自行退出 agent.chat() 并在 finally 中释放槽位。
-        // 不能立即清空槽位：interrupt 对进行中的 HTTP 请求/工具调用不一定立刻生效，
-        // 提前放行会让新旧两个会话并发写同一份对话记忆，产生残缺的工具调用序列。
-        long deadline = System.currentTimeMillis() + 5000;
-        while (processingThread.get() == t && System.currentTimeMillis() < deadline) {
+        waitForProcessingThreadToFinish(
+            processingThread,
+            t,
+            5000,
+            () -> logger.warn("AI 处理线程在 5 秒内未响应中断；为防止流式回调与新会话并发，继续等待旧流到达终态。")
+        );
+    }
+
+    static void waitForProcessingThreadToFinish(
+        java.util.concurrent.atomic.AtomicReference<Thread> slot,
+        Thread target,
+        long warnAfterMillis,
+        Runnable onSlowWait
+    ) {
+        boolean callerInterrupted = false;
+        boolean warned = false;
+        long warningDeadline = System.currentTimeMillis() + Math.max(0, warnAfterMillis);
+        while (slot.get() == target) {
+            if (!warned && System.currentTimeMillis() >= warningDeadline) {
+                warned = true;
+                if (onSlowWait != null) onSlowWait.run();
+            }
             try {
                 Thread.sleep(50);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                break;
+            } catch (InterruptedException error) {
+                callerInterrupted = true;
             }
         }
-        if (processingThread.compareAndSet(t, null)) {
-            logger.warn("AI 处理线程在 5 秒内未响应中断，已强制释放处理槽位，旧会话可能仍在后台短暂运行。");
-        }
+        if (callerInterrupted) Thread.currentThread().interrupt();
     }
 
     public String processMessage(String message) {
@@ -232,7 +252,7 @@ public class AgentManager {
             if (memoryStoreForCall != null) {
                 memoryStoreForCall.repairConversation("default");
             }
-            return agentForCall.chat(message);
+            return collectTokenStream(agentForCall.chat(message));
         } catch (Exception e) {
             boolean isInterrupted = current.isInterrupted() || e.getCause() instanceof InterruptedException || e.toString().toLowerCase().contains("interrupted");
             if (isInterrupted) {
@@ -251,6 +271,44 @@ public class AgentManager {
                 doClearMemoryNow();
             }
         }
+    }
+
+    static String collectTokenStream(TokenStream stream) {
+        if (stream == null) throw new IllegalArgumentException("token stream is required");
+        StringBuffer streamedText = new StringBuffer();
+        CompletableFuture<String> completed = new CompletableFuture<>();
+        stream.onNext(streamedText::append)
+            .onComplete(response -> {
+                String finalText = response != null && response.content() != null
+                    ? response.content().text()
+                    : null;
+                completed.complete(finalText != null ? finalText : streamedText.toString());
+            })
+            .onError(completed::completeExceptionally);
+        stream.start();
+
+        boolean interrupted = false;
+        String result = null;
+        Throwable failure = null;
+        while (result == null && failure == null) {
+            try {
+                result = completed.get();
+            } catch (InterruptedException error) {
+                interrupted = true;
+            } catch (ExecutionException error) {
+                failure = error.getCause();
+            }
+        }
+        if (interrupted) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException(
+                "streaming chat interrupted after terminal callback",
+                failure != null ? failure : new InterruptedException("streaming chat interrupted")
+            );
+        }
+        if (failure instanceof RuntimeException runtime) throw runtime;
+        if (failure != null) throw new RuntimeException("streaming chat failed", failure);
+        return result;
     }
 
     public TaskManager getTaskManager() {
