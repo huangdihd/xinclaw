@@ -3,22 +3,19 @@ package xin.claw;
 import static org.junit.jupiter.api.Assertions.*;
 
 import dev.langchain4j.data.message.AiMessage;
-import dev.langchain4j.data.message.ToolExecutionResultMessage;
+
 import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
 import dev.langchain4j.model.output.Response;
 import dev.langchain4j.rag.content.Content;
 import dev.langchain4j.service.TokenStream;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
+
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
-import java.nio.file.Path;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
-import xin.claw.memory.PersistentChatMemoryStore;
 
 final class AgentManagerStreamingTest {
     @Test
@@ -58,14 +55,14 @@ final class AgentManagerStreamingTest {
     @Test
     void retriesToollessFutureCommitmentUntilAToolIsActuallyRequested() {
         AtomicInteger calls = new AtomicInteger();
-        AtomicReference<Set<String>> completedTools = new AtomicReference<>(Set.of());
+        java.util.concurrent.atomic.AtomicLong completedTools = new java.util.concurrent.atomic.AtomicLong();
         List<String> inputs = new ArrayList<>();
         AgentManager.BotAgent agent = message -> {
             inputs.add(message);
             if (calls.getAndIncrement() == 0) {
                 return new FakeTokenStream(false, false, "I'll start by checking my surroundings.");
             }
-            completedTools.set(Set.of("call-1:whereAmI"));
+            completedTools.incrementAndGet();
             return new FakeTokenStream(false, false, "final answer");
         };
 
@@ -84,7 +81,7 @@ final class AgentManagerStreamingTest {
     @Test
     void retriesToollessPlanningPreambleObservedInBenchmark() {
         AtomicInteger calls = new AtomicInteger();
-        AtomicReference<Set<String>> completedTools = new AtomicReference<>(Set.of());
+        java.util.concurrent.atomic.AtomicLong completedTools = new java.util.concurrent.atomic.AtomicLong();
         AgentManager.BotAgent agent = message -> {
             if (calls.getAndIncrement() == 0) {
                 return new FakeTokenStream(
@@ -93,7 +90,7 @@ final class AgentManagerStreamingTest {
                     "I'll break this into a task list, locate the outpost, navigate to it, then enter it."
                 );
             }
-            completedTools.set(Set.of("call-2:addTask"));
+            completedTools.incrementAndGet();
             return new FakeTokenStream(false, false, "final answer");
         };
 
@@ -115,7 +112,7 @@ final class AgentManagerStreamingTest {
             return new FakeTokenStream(false, false, "I'll start later.");
         };
 
-        String response = AgentManager.executeWithActionGuard(agent, "Find the outpost.", Set::of);
+        String response = AgentManager.executeWithActionGuard(agent, "Find the outpost.", () -> 0L);
 
         assertEquals("Agent failed to begin execution: no tool was requested.", response);
         assertEquals(2, calls.get());
@@ -132,7 +129,7 @@ final class AgentManagerStreamingTest {
         String response = AgentManager.executeWithActionGuard(
             agent,
             "Explain how pathfinding works.",
-            Set::of
+            () -> 0L
         );
 
         assertEquals("Let me explain how pathfinding works.", response);
@@ -150,7 +147,7 @@ final class AgentManagerStreamingTest {
         String response = AgentManager.executeWithActionGuard(
             agent,
             "Can you explain how to find diamonds?",
-            Set::of
+            () -> 0L
         );
 
         assertEquals("I'll start by explaining how to find diamonds.", response);
@@ -160,12 +157,12 @@ final class AgentManagerStreamingTest {
     @Test
     void retriesExecutableLetMeActionPreamble() {
         AtomicInteger calls = new AtomicInteger();
-        AtomicReference<Set<String>> completedTools = new AtomicReference<>(Set.of());
+        java.util.concurrent.atomic.AtomicLong completedTools = new java.util.concurrent.atomic.AtomicLong();
         AgentManager.BotAgent agent = message -> {
             if (calls.getAndIncrement() == 0) {
                 return new FakeTokenStream(false, false, "Let me check my surroundings.");
             }
-            completedTools.set(Set.of("call-4:scanSurroundings"));
+            completedTools.incrementAndGet();
             return new FakeTokenStream(false, false, "checked");
         };
 
@@ -204,23 +201,12 @@ final class AgentManagerStreamingTest {
     }
 
     @Test
-    void readsOnlyIdBearingCompletedToolResultsFromPersistentMemory(@TempDir Path tempDir) {
-        PersistentChatMemoryStore store = new PersistentChatMemoryStore(tempDir.toString());
-        store.updateMessages("default", List.of(
-            ToolExecutionResultMessage.from("call-5", "whereAmI", "ok"),
-            ToolExecutionResultMessage.from(null, "scanSurroundings", "ok")
-        ));
-
-        assertEquals(Set.of("call-5:whereAmI"), AgentManager.completedToolResultKeys(store));
-    }
-
-    @Test
     void doesNotRetryToolUsingTurnWhoseFinalTextLooksLikeCommitment() {
         AtomicInteger calls = new AtomicInteger();
-        AtomicReference<Set<String>> completedTools = new AtomicReference<>(Set.of());
+        java.util.concurrent.atomic.AtomicLong completedTools = new java.util.concurrent.atomic.AtomicLong();
         AgentManager.BotAgent agent = message -> {
             calls.incrementAndGet();
-            completedTools.set(Set.of("call-3:pathfindToBounds"));
+            completedTools.incrementAndGet();
             return new FakeTokenStream(false, false, "I'll start moving now.");
         };
 

@@ -38,10 +38,15 @@ import java.util.List;
 public class PersistentChatMemoryStore implements ChatMemoryStore {
     private static final Logger logger = LoggerFactory.getLogger(PersistentChatMemoryStore.class);
     private final Path filePath;
+    private final java.util.Set<String> completedToolExecutionIds =
+        java.util.concurrent.ConcurrentHashMap.newKeySet();
+    private final java.util.concurrent.atomic.AtomicLong completedToolExecutionCount =
+        new java.util.concurrent.atomic.AtomicLong();
 
     public PersistentChatMemoryStore(String pluginDir) {
         this.filePath = new File(pluginDir + File.separator + "chat-memory.json").toPath();
         ensureFileExists();
+        recordCompletedToolExecutions(getMessages("default"));
     }
 
     private void ensureFileExists() {
@@ -156,6 +161,7 @@ public class PersistentChatMemoryStore implements ChatMemoryStore {
     public void updateMessages(Object memoryId, List<ChatMessage> messages) {
         try {
             List<ChatMessage> normalized = collapseConsecutiveDuplicateFinalAiMessages(messages);
+            recordCompletedToolExecutions(normalized);
             String json = ChatMessageSerializer.messagesToJson(normalized);
             Files.write(filePath, json.getBytes(StandardCharsets.UTF_8));
         } catch (IOException e) {
@@ -167,8 +173,25 @@ public class PersistentChatMemoryStore implements ChatMemoryStore {
     public void deleteMessages(Object memoryId) {
         try {
             Files.write(filePath, "[]".getBytes(StandardCharsets.UTF_8));
+            completedToolExecutionIds.clear();
+            completedToolExecutionCount.set(0L);
         } catch (IOException e) {
             logger.error("Failed to clear messages in store", e);
+        }
+    }
+
+    public long completedToolExecutionCount() {
+        return completedToolExecutionCount.get();
+    }
+
+    private void recordCompletedToolExecutions(List<ChatMessage> messages) {
+        for (ChatMessage message : messages) {
+            if (message instanceof ToolExecutionResultMessage result) {
+                String id = result.id();
+                if (id != null && !id.isBlank() && completedToolExecutionIds.add(id)) {
+                    completedToolExecutionCount.incrementAndGet();
+                }
+            }
         }
     }
 }

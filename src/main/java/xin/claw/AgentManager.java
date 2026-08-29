@@ -18,7 +18,6 @@
 package xin.claw;
 
 import dev.langchain4j.memory.ChatMemory;
-import dev.langchain4j.data.message.ToolExecutionResultMessage;
 import dev.langchain4j.memory.chat.MessageWindowChatMemory;
 import dev.langchain4j.model.chat.StreamingChatLanguageModel;
 import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
@@ -26,11 +25,9 @@ import dev.langchain4j.service.AiServices;
 import dev.langchain4j.service.SystemMessage;
 import dev.langchain4j.service.TokenStream;
 import java.time.Duration;
-import java.util.HashSet;
-import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
-import java.util.function.Supplier;
+import java.util.function.LongSupplier;
 import java.util.regex.Pattern;
 import xin.claw.memory.PersistentChatMemoryStore;
 import xin.claw.tasks.TaskManager;
@@ -274,7 +271,7 @@ public class AgentManager {
             return executeWithActionGuard(
                 agentForCall,
                 message,
-                () -> completedToolResultKeys(memoryStoreForCall)
+                () -> memoryStoreForCall == null ? 0L : memoryStoreForCall.completedToolExecutionCount()
             );
         } catch (Exception e) {
             boolean isInterrupted = current.isInterrupted() || e.getCause() instanceof InterruptedException || e.toString().toLowerCase().contains("interrupted");
@@ -299,11 +296,11 @@ public class AgentManager {
     static String executeWithActionGuard(
         BotAgent agent,
         String message,
-        Supplier<Set<String>> completedToolResults
+        LongSupplier completedToolResults
     ) {
-        Set<String> before = snapshotToolResults(completedToolResults);
+        long before = snapshotToolResultCount(completedToolResults);
         String first = collectTokenStream(agent.chat(message));
-        Set<String> after = snapshotToolResults(completedToolResults);
+        long after = snapshotToolResultCount(completedToolResults);
         if (!requiresToolAction(message)
             || hasNewToolResult(before, after)
             || !isFutureActionCommitment(first)) {
@@ -312,9 +309,9 @@ public class AgentManager {
         String correction = "[ACTION_CORRECTION] 你上一条回复只承诺稍后行动，却没有调用任何工具。"
             + "现在必须执行原始指令，并在本回复中调用至少一个合适的实际工具；禁止继续描述将来要做什么。"
             + "\n原始指令：" + message;
-        Set<String> beforeRetry = after;
+        long beforeRetry = after;
         String retry = collectTokenStream(agent.chat(correction));
-        Set<String> afterRetry = snapshotToolResults(completedToolResults);
+        long afterRetry = snapshotToolResultCount(completedToolResults);
         if (!hasNewToolResult(beforeRetry, afterRetry)) {
             return "Agent failed to begin execution: no tool was requested.";
         }
@@ -409,29 +406,12 @@ public class AgentManager {
         return result;
     }
 
-    private static Set<String> snapshotToolResults(Supplier<Set<String>> supplier) {
-        if (supplier == null) return Set.of();
-        Set<String> results = supplier.get();
-        return results == null ? Set.of() : Set.copyOf(results);
+    private static long snapshotToolResultCount(LongSupplier supplier) {
+        return supplier == null ? 0L : supplier.getAsLong();
     }
 
-    private static boolean hasNewToolResult(Set<String> before, Set<String> after) {
-        for (String result : after) {
-            if (!before.contains(result)) return true;
-        }
-        return false;
-    }
-
-    static Set<String> completedToolResultKeys(PersistentChatMemoryStore store) {
-        if (store == null) return Set.of();
-        Set<String> keys = new HashSet<>();
-        for (var message : store.getMessages("default")) {
-            if (message instanceof ToolExecutionResultMessage result) {
-                String id = result.id();
-                if (id != null && !id.isBlank()) keys.add(id + ":" + result.toolName());
-            }
-        }
-        return Set.copyOf(keys);
+    private static boolean hasNewToolResult(long before, long after) {
+        return after > before;
     }
 
     public TaskManager getTaskManager() {

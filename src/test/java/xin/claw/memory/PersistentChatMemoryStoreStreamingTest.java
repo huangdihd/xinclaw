@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
+import dev.langchain4j.data.message.ToolExecutionResultMessage;
 import dev.langchain4j.data.message.UserMessage;
 import java.nio.file.Path;
 import java.util.List;
@@ -60,5 +61,44 @@ final class PersistentChatMemoryStoreStreamingTest {
             List.of(UserMessage.from("question"), AiMessage.from("final")),
             store.getMessages("default")
         );
+    }
+
+    @Test
+    void remembersCompletedToolExecutionsAfterMemoryWindowEviction(@TempDir Path directory) {
+        PersistentChatMemoryStore store = new PersistentChatMemoryStore(directory.toString());
+        assertEquals(0L, store.completedToolExecutionCount());
+
+        store.updateMessages("default", List.of(
+            ToolExecutionResultMessage.from("call-1", "whereAmI", "ok")
+        ));
+        assertEquals(1L, store.completedToolExecutionCount());
+
+        store.updateMessages("default", List.of(AiMessage.from("final after eviction")));
+        assertEquals(1L, store.completedToolExecutionCount());
+
+        store.updateMessages("default", List.of(
+            ToolExecutionResultMessage.from("call-2", "scanSurroundings", "ok")
+        ));
+        store.updateMessages("default", List.of(
+            ToolExecutionResultMessage.from("call-2", "scanSurroundings", "same result repeated")
+        ));
+        assertEquals(2L, store.completedToolExecutionCount());
+    }
+
+    @Test
+    void seedsExistingToolIdsBeforeTheFirstNewTurn(@TempDir Path directory) {
+        PersistentChatMemoryStore writer = new PersistentChatMemoryStore(directory.toString());
+        writer.updateMessages("default", List.of(
+            ToolExecutionResultMessage.from("old-call", "whereAmI", "ok")
+        ));
+
+        PersistentChatMemoryStore reopened = new PersistentChatMemoryStore(directory.toString());
+        assertEquals(1L, reopened.completedToolExecutionCount());
+
+        reopened.updateMessages("default", List.of(
+            ToolExecutionResultMessage.from("old-call", "whereAmI", "ok"),
+            AiMessage.from("new tool-less answer")
+        ));
+        assertEquals(1L, reopened.completedToolExecutionCount());
     }
 }
