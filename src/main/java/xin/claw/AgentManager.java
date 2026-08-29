@@ -18,6 +18,7 @@
 package xin.claw;
 
 import dev.langchain4j.memory.ChatMemory;
+import dev.langchain4j.data.message.ToolExecutionResultMessage;
 import dev.langchain4j.memory.chat.MessageWindowChatMemory;
 import dev.langchain4j.model.chat.StreamingChatLanguageModel;
 import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
@@ -25,8 +26,12 @@ import dev.langchain4j.service.AiServices;
 import dev.langchain4j.service.SystemMessage;
 import dev.langchain4j.service.TokenStream;
 import java.time.Duration;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
+import java.util.function.Supplier;
+import java.util.regex.Pattern;
 import xin.claw.memory.PersistentChatMemoryStore;
 import xin.claw.tasks.TaskManager;
 import xin.claw.tools.*;
@@ -36,6 +41,15 @@ import org.slf4j.LoggerFactory;
 
 public class AgentManager {
     private static final Logger logger = LoggerFactory.getLogger(AgentManager.class);
+    private static final Pattern ENGLISH_ACTION_REQUEST = Pattern.compile(
+        "^(find|locate|enter|navigate|move|go|build|mine|collect|search|scan|check|open|craft|place|dig|attack|follow|walk|travel|show|list|get|stop|use)\\b"
+    );
+    private static final Pattern ENGLISH_FUTURE_ACTION = Pattern.compile(
+        "^(?:i(?:'ll| will)\\s+(?:start|begin)\\b|i(?:'ll| will)\\s+break\\s+(?:this|the task)\\s+into\\b).*"
+    );
+    private static final Pattern ENGLISH_LET_ME_ACTION = Pattern.compile(
+        "^let me\\s+(?:find|locate|enter|navigate|move|go|build|mine|collect|search|scan|check|open|craft|place|dig|attack|follow|walk|travel|show|list|get|stop|use)\\b.*"
+    );
     
     public interface BotAgent {
         @SystemMessage({
@@ -257,7 +271,11 @@ public class AgentManager {
             if (memoryStoreForCall != null) {
                 memoryStoreForCall.repairConversation("default");
             }
-            return collectTokenStream(agentForCall.chat(message));
+            return executeWithActionGuard(
+                agentForCall,
+                message,
+                () -> completedToolResultKeys(memoryStoreForCall)
+            );
         } catch (Exception e) {
             boolean isInterrupted = current.isInterrupted() || e.getCause() instanceof InterruptedException || e.toString().toLowerCase().contains("interrupted");
             if (isInterrupted) {
@@ -278,16 +296,87 @@ public class AgentManager {
         }
     }
 
+    static String executeWithActionGuard(
+        BotAgent agent,
+        String message,
+        Supplier<Set<String>> completedToolResults
+    ) {
+        Set<String> before = snapshotToolResults(completedToolResults);
+        String first = collectTokenStream(agent.chat(message));
+        Set<String> after = snapshotToolResults(completedToolResults);
+        if (!requiresToolAction(message)
+            || hasNewToolResult(before, after)
+            || !isFutureActionCommitment(first)) {
+            return first;
+        }
+        String correction = "[ACTION_CORRECTION] 你上一条回复只承诺稍后行动，却没有调用任何工具。"
+            + "现在必须执行原始指令，并在本回复中调用至少一个合适的实际工具；禁止继续描述将来要做什么。"
+            + "\n原始指令：" + message;
+        Set<String> beforeRetry = after;
+        String retry = collectTokenStream(agent.chat(correction));
+        Set<String> afterRetry = snapshotToolResults(completedToolResults);
+        if (!hasNewToolResult(beforeRetry, afterRetry)) {
+            return "Agent failed to begin execution: no tool was requested.";
+        }
+        return retry;
+    }
+
+    static boolean requiresToolAction(String message) {
+        if (message == null) return false;
+        String normalized = message.strip().toLowerCase(java.util.Locale.ROOT);
+        if (normalized.isEmpty()) return false;
+        if (normalized.startsWith("[system_tick]") || normalized.startsWith("[system_event]")) {
+            return true;
+        }
+        String directRequest = normalized.replaceFirst("^please\\s+", "")
+            .replaceFirst("^(?:can|could|would|will)\\s+you\\s+", "")
+            .replaceFirst("^please\\s+", "");
+        if (directRequest.startsWith("explain ")
+            || directRequest.startsWith("describe ")
+            || directRequest.startsWith("summarize ")
+            || directRequest.startsWith("what ")
+            || directRequest.startsWith("why ")
+            || directRequest.startsWith("how ")
+            || directRequest.startsWith("tell me ")) {
+            return false;
+        }
+        if (ENGLISH_ACTION_REQUEST.matcher(directRequest).find()) return true;
+        String directChinese = normalized.replaceFirst("^(?:请你|请|你可以|你能|帮我)", "").strip();
+        return directChinese.startsWith("寻找")
+            || directChinese.startsWith("找到")
+            || directChinese.startsWith("找")
+            || directChinese.startsWith("进入")
+            || directChinese.startsWith("移动")
+            || directChinese.startsWith("前往")
+            || directChinese.startsWith("建造")
+            || directChinese.startsWith("挖掘")
+            || directChinese.startsWith("收集")
+            || directChinese.startsWith("搜索")
+            || directChinese.startsWith("扫描")
+            || directChinese.startsWith("检查")
+            || directChinese.startsWith("显示")
+            || directChinese.startsWith("列出")
+            || directChinese.startsWith("获取")
+            || directChinese.startsWith("停止")
+            || directChinese.startsWith("使用");
+    }
+
+    static boolean isFutureActionCommitment(String text) {
+        if (text == null) return false;
+        String normalized = text.strip().toLowerCase(java.util.Locale.ROOT);
+        return ENGLISH_FUTURE_ACTION.matcher(normalized).matches()
+            || ENGLISH_LET_ME_ACTION.matcher(normalized).matches()
+            || normalized.startsWith("我会开始")
+            || normalized.startsWith("我将开始")
+            || normalized.startsWith("接下来我");
+    }
+
     static String collectTokenStream(TokenStream stream) {
         if (stream == null) throw new IllegalArgumentException("token stream is required");
         StringBuffer streamedText = new StringBuffer();
         CompletableFuture<String> completed = new CompletableFuture<>();
         stream.onNext(streamedText::append)
             .onComplete(response -> {
-                if (response != null && response.content() != null
-                    && response.content().hasToolExecutionRequests()) {
-                    return;
-                }
                 String finalText = response != null && response.content() != null
                     ? response.content().text()
                     : null;
@@ -318,6 +407,31 @@ public class AgentManager {
         if (failure instanceof RuntimeException runtime) throw runtime;
         if (failure != null) throw new RuntimeException("streaming chat failed", failure);
         return result;
+    }
+
+    private static Set<String> snapshotToolResults(Supplier<Set<String>> supplier) {
+        if (supplier == null) return Set.of();
+        Set<String> results = supplier.get();
+        return results == null ? Set.of() : Set.copyOf(results);
+    }
+
+    private static boolean hasNewToolResult(Set<String> before, Set<String> after) {
+        for (String result : after) {
+            if (!before.contains(result)) return true;
+        }
+        return false;
+    }
+
+    static Set<String> completedToolResultKeys(PersistentChatMemoryStore store) {
+        if (store == null) return Set.of();
+        Set<String> keys = new HashSet<>();
+        for (var message : store.getMessages("default")) {
+            if (message instanceof ToolExecutionResultMessage result) {
+                String id = result.id();
+                if (id != null && !id.isBlank()) keys.add(id + ":" + result.toolName());
+            }
+        }
+        return Set.copyOf(keys);
     }
 
     public TaskManager getTaskManager() {

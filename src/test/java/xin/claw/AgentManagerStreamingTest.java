@@ -2,18 +2,23 @@ package xin.claw;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.data.message.AiMessage;
+import dev.langchain4j.data.message.ToolExecutionResultMessage;
 import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
 import dev.langchain4j.model.output.Response;
 import dev.langchain4j.rag.content.Content;
 import dev.langchain4j.service.TokenStream;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
+import java.nio.file.Path;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import xin.claw.memory.PersistentChatMemoryStore;
 
 final class AgentManagerStreamingTest {
     @Test
@@ -49,12 +54,184 @@ final class AgentManagerStreamingTest {
         assertEquals("final answer", AgentManager.collectTokenStream(stream));
     }
 
+
     @Test
-    void ignoresIntermediateCompletionThatStillContainsToolRequests() {
-        assertEquals(
-            "final answer",
-            AgentManager.collectTokenStream(new IntermediateCompletionTokenStream())
+    void retriesToollessFutureCommitmentUntilAToolIsActuallyRequested() {
+        AtomicInteger calls = new AtomicInteger();
+        AtomicReference<Set<String>> completedTools = new AtomicReference<>(Set.of());
+        List<String> inputs = new ArrayList<>();
+        AgentManager.BotAgent agent = message -> {
+            inputs.add(message);
+            if (calls.getAndIncrement() == 0) {
+                return new FakeTokenStream(false, false, "I'll start by checking my surroundings.");
+            }
+            completedTools.set(Set.of("call-1:whereAmI"));
+            return new FakeTokenStream(false, false, "final answer");
+        };
+
+        String response = AgentManager.executeWithActionGuard(
+            agent,
+            "Find the nearby pillager outpost and enter it.",
+            completedTools::get
         );
+
+        assertEquals("final answer", response);
+        assertEquals(2, calls.get());
+        assertTrue(inputs.get(1).contains("[ACTION_CORRECTION]"));
+        assertTrue(inputs.get(1).contains("Find the nearby pillager outpost and enter it."));
+    }
+
+    @Test
+    void retriesToollessPlanningPreambleObservedInBenchmark() {
+        AtomicInteger calls = new AtomicInteger();
+        AtomicReference<Set<String>> completedTools = new AtomicReference<>(Set.of());
+        AgentManager.BotAgent agent = message -> {
+            if (calls.getAndIncrement() == 0) {
+                return new FakeTokenStream(
+                    false,
+                    false,
+                    "I'll break this into a task list, locate the outpost, navigate to it, then enter it."
+                );
+            }
+            completedTools.set(Set.of("call-2:addTask"));
+            return new FakeTokenStream(false, false, "final answer");
+        };
+
+        String response = AgentManager.executeWithActionGuard(
+            agent,
+            "Find and enter the outpost.",
+            completedTools::get
+        );
+
+        assertEquals("final answer", response);
+        assertEquals(2, calls.get());
+    }
+
+    @Test
+    void rejectsARepeatedToollessFutureCommitment() {
+        AtomicInteger calls = new AtomicInteger();
+        AgentManager.BotAgent agent = message -> {
+            calls.incrementAndGet();
+            return new FakeTokenStream(false, false, "I'll start later.");
+        };
+
+        String response = AgentManager.executeWithActionGuard(agent, "Find the outpost.", Set::of);
+
+        assertEquals("Agent failed to begin execution: no tool was requested.", response);
+        assertEquals(2, calls.get());
+    }
+
+    @Test
+    void doesNotRetryConversationalLetMeResponse() {
+        AtomicInteger calls = new AtomicInteger();
+        AgentManager.BotAgent agent = message -> {
+            calls.incrementAndGet();
+            return new FakeTokenStream(false, false, "Let me explain how pathfinding works.");
+        };
+
+        String response = AgentManager.executeWithActionGuard(
+            agent,
+            "Explain how pathfinding works.",
+            Set::of
+        );
+
+        assertEquals("Let me explain how pathfinding works.", response);
+        assertEquals(1, calls.get());
+    }
+
+    @Test
+    void doesNotCoerceToolsForExplanatoryQuestionContainingActionVerb() {
+        AtomicInteger calls = new AtomicInteger();
+        AgentManager.BotAgent agent = message -> {
+            calls.incrementAndGet();
+            return new FakeTokenStream(false, false, "I'll start by explaining how to find diamonds.");
+        };
+
+        String response = AgentManager.executeWithActionGuard(
+            agent,
+            "Can you explain how to find diamonds?",
+            Set::of
+        );
+
+        assertEquals("I'll start by explaining how to find diamonds.", response);
+        assertEquals(1, calls.get());
+    }
+
+    @Test
+    void retriesExecutableLetMeActionPreamble() {
+        AtomicInteger calls = new AtomicInteger();
+        AtomicReference<Set<String>> completedTools = new AtomicReference<>(Set.of());
+        AgentManager.BotAgent agent = message -> {
+            if (calls.getAndIncrement() == 0) {
+                return new FakeTokenStream(false, false, "Let me check my surroundings.");
+            }
+            completedTools.set(Set.of("call-4:scanSurroundings"));
+            return new FakeTokenStream(false, false, "checked");
+        };
+
+        String response = AgentManager.executeWithActionGuard(
+            agent,
+            "Check my surroundings.",
+            completedTools::get
+        );
+
+        assertEquals("checked", response);
+        assertEquals(2, calls.get());
+    }
+
+    @Test
+    void classifiesCommonDirectToolRequestsButNotExplanations() {
+        for (String request : List.of(
+            "show my inventory",
+            "list my tasks",
+            "get my vitals",
+            "stop walking",
+            "use the item",
+            "Can you find the outpost?",
+            "请你寻找前哨站",
+            "帮我找前哨站"
+        )) {
+            assertTrue(AgentManager.requiresToolAction(request), request);
+        }
+        for (String request : List.of(
+            "Can you explain how to find diamonds?",
+            "Explain how pathfinding works.",
+            "What does scanSurroundings do?",
+            "Tell me how to build a house."
+        )) {
+            assertFalse(AgentManager.requiresToolAction(request), request);
+        }
+    }
+
+    @Test
+    void readsOnlyIdBearingCompletedToolResultsFromPersistentMemory(@TempDir Path tempDir) {
+        PersistentChatMemoryStore store = new PersistentChatMemoryStore(tempDir.toString());
+        store.updateMessages("default", List.of(
+            ToolExecutionResultMessage.from("call-5", "whereAmI", "ok"),
+            ToolExecutionResultMessage.from(null, "scanSurroundings", "ok")
+        ));
+
+        assertEquals(Set.of("call-5:whereAmI"), AgentManager.completedToolResultKeys(store));
+    }
+
+    @Test
+    void doesNotRetryToolUsingTurnWhoseFinalTextLooksLikeCommitment() {
+        AtomicInteger calls = new AtomicInteger();
+        AtomicReference<Set<String>> completedTools = new AtomicReference<>(Set.of());
+        AgentManager.BotAgent agent = message -> {
+            calls.incrementAndGet();
+            completedTools.set(Set.of("call-3:pathfindToBounds"));
+            return new FakeTokenStream(false, false, "I'll start moving now.");
+        };
+
+        String response = AgentManager.executeWithActionGuard(
+            agent,
+            "Find and enter the outpost.",
+            completedTools::get
+        );
+
+        assertEquals("I'll start moving now.", response);
+        assertEquals(1, calls.get());
     }
 
     @Test
@@ -150,25 +327,6 @@ final class AgentManagerStreamingTest {
                 onNext.accept("world");
             }
             onComplete.accept(Response.from(AiMessage.from(completionText)));
-        }
-    }
-
-    private static final class IntermediateCompletionTokenStream implements TokenStream {
-        private Consumer<Response<AiMessage>> onComplete = ignored -> {};
-        private Consumer<Throwable> onError = ignored -> {};
-
-        @Override public TokenStream onRetrieved(Consumer<List<Content>> consumer) { return this; }
-        @Override public TokenStream onNext(Consumer<String> consumer) { return this; }
-        @Override public TokenStream onComplete(Consumer<Response<AiMessage>> consumer) { this.onComplete = consumer; return this; }
-        @Override public TokenStream onError(Consumer<Throwable> consumer) { this.onError = consumer; return this; }
-        @Override public TokenStream ignoreErrors() { return this; }
-
-        @Override
-        public void start() {
-            ToolExecutionRequest request = ToolExecutionRequest.builder()
-                .id("call-1").name("whereAmI").arguments("{}").build();
-            onComplete.accept(Response.from(AiMessage.from("planning", List.of(request))));
-            onComplete.accept(Response.from(AiMessage.from("final answer")));
         }
     }
 
