@@ -139,8 +139,9 @@ public class AgentManager {
     }
 
     static StreamingChatLanguageModel buildStreamingModel(AgentTracePublisher tracePublisher) {
-        if (PluginConfig.modelName != null
-            && PluginConfig.modelName.toLowerCase(java.util.Locale.ROOT).contains("deepseek")) {
+        boolean deepSeekModel = PluginConfig.modelName != null
+            && PluginConfig.modelName.toLowerCase(java.util.Locale.ROOT).contains("deepseek");
+        if (PluginConfig.enableThinking || deepSeekModel) {
             return new SingleTerminalStreamingChatLanguageModel(
                 new DeepSeekThinkingStreamingChatLanguageModel(
                     PluginConfig.apiKey,

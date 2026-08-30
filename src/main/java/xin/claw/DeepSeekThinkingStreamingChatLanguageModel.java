@@ -38,9 +38,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import xin.claw.trace.AgentTracePublisher;
 
 /**
- * OpenAI-compatible DeepSeek SSE adapter that preserves reasoning_content.
+ * OpenAI-compatible thinking SSE adapter that preserves reasoning_content.
  *
- * LangChain4j 0.35 discards that DeepSeek-specific field. This adapter keeps it
+ * LangChain4j 0.35 discards that provider extension. This adapter keeps it
  * in a sidecar keyed by the exact assistant message and replays it on later
  * tool-aware requests as required by the DeepSeek thinking-mode protocol.
  */

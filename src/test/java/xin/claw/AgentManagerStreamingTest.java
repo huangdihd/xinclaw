@@ -10,6 +10,7 @@ import dev.langchain4j.rag.content.Content;
 import dev.langchain4j.service.TokenStream;
 import java.util.ArrayList;
 import java.util.List;
+import java.lang.reflect.Field;
 
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -25,6 +26,28 @@ final class AgentManagerStreamingTest {
             AgentManager.BotAgent.class.getMethod("chat", String.class).getReturnType()
         );
         assertInstanceOf(SingleTerminalStreamingChatLanguageModel.class, AgentManager.buildStreamingModel());
+    }
+
+    @Test
+    void glmCodingPlanThinkingUsesReasoningTraceAdapter() throws Exception {
+        String originalModel = PluginConfig.modelName;
+        boolean originalThinking = PluginConfig.enableThinking;
+        try {
+            PluginConfig.modelName = "glm-coding-plan/glm-5.3-flash";
+            PluginConfig.enableThinking = true;
+
+            SingleTerminalStreamingChatLanguageModel model = assertInstanceOf(
+                SingleTerminalStreamingChatLanguageModel.class,
+                AgentManager.buildStreamingModel()
+            );
+            Field delegate = SingleTerminalStreamingChatLanguageModel.class.getDeclaredField("delegate");
+            delegate.setAccessible(true);
+
+            assertInstanceOf(DeepSeekThinkingStreamingChatLanguageModel.class, delegate.get(model));
+        } finally {
+            PluginConfig.modelName = originalModel;
+            PluginConfig.enableThinking = originalThinking;
+        }
     }
 
     @Test
