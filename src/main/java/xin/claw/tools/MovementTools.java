@@ -169,10 +169,10 @@ public class MovementTools {
         return formatDirectPathPreview(goal, path);
     }
 
-    @Tool("在指定半开区间内寻找最近可达站立点。min 与 max_exclusive 必须直接复制 searchVoxelRegion 返回的 [x,y,z] 三整数数组，不要拆分或重排。不会移动机器人。")
+    @Tool("在指定半开区间内寻找最近可达站立点。min 与 max_exclusive 必须直接复制 CLMCP 搜索结果返回的 [x,y,z] 三整数数组，不要拆分或重排。不会移动机器人。")
     public String findReachablePointInBounds(
-            @P("最小坐标 [x,y,z]，直接复制 searchVoxelRegion.bounds.min") int[] min,
-            @P("最大坐标 [x,y,z]，直接复制 searchVoxelRegion.bounds.max_exclusive") int[] max_exclusive) {
+            @P("最小坐标 [x,y,z]，直接复制 CLMCP 搜索结果 bounds.min") int[] min,
+            @P("最大坐标 [x,y,z]，直接复制 CLMCP 搜索结果 bounds.max_exclusive") int[] max_exclusive) {
         logger.info(
             "[AI Tool Call] 调用了 findReachablePointInBounds(min={}, max_exclusive={})",
             java.util.Arrays.toString(min), java.util.Arrays.toString(max_exclusive)
@@ -235,10 +235,10 @@ public class MovementTools {
         }
     }
 
-    @Tool("智能寻路到指定半开区间内最近的可达站立点。min 与 max_exclusive 必须直接复制 searchVoxelRegion 返回的 [x,y,z] 三整数数组，不要拆分或重排；原有 pathfindTo 保持可用。")
+    @Tool("智能寻路到指定半开区间内最近的可达站立点。min 与 max_exclusive 必须直接复制 CLMCP 搜索结果返回的 [x,y,z] 三整数数组，不要拆分或重排；原有 pathfindTo 保持可用。")
     public String pathfindToBounds(
-            @P("最小坐标 [x,y,z]，直接复制 searchVoxelRegion.bounds.min") int[] min,
-            @P("最大坐标 [x,y,z]，直接复制 searchVoxelRegion.bounds.max_exclusive") int[] max_exclusive,
+            @P("最小坐标 [x,y,z]，直接复制 CLMCP 搜索结果 bounds.min") int[] min,
+            @P("最大坐标 [x,y,z]，直接复制 CLMCP 搜索结果 bounds.max_exclusive") int[] max_exclusive,
             @P("绑定的任务ID；不绑定时传空字符串") String taskId) {
         logger.info(
             "[AI Tool Call] 调用了 pathfindToBounds(min={}, max_exclusive={}, taskId={})",

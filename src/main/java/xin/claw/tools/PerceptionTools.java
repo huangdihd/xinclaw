@@ -253,10 +253,10 @@ public class PerceptionTools {
         return sb.toString();
     }
 
-    @Tool("直接使用 searchVoxelRegion 返回的半开 bounds 生成候选区域俯视分层地图，不会移动机器人。min 与 max_exclusive 必须原样复制 Rank-1 bounds；mapMinY/mapMaxYExclusive 选择 bounds 内最多5个绝对Y层。用于 CLMCP 候选内部的几何细化、入口和内部定位；不得脱离候选范围扫描任意远程坐标。水平边长最多32格。")
+    @Tool("直接使用 searchLoadedVoxelRegions 或 searchVoxelRegion 返回的半开 bounds 生成候选区域俯视分层地图，不会移动机器人。min 与 max_exclusive 必须原样复制 Rank-1 bounds；mapMinY/mapMaxYExclusive 选择 bounds 内最多5个绝对Y层。用于 CLMCP 候选内部的几何细化、入口和内部定位；不得脱离候选范围扫描任意远程坐标。水平边长最多32格。")
     public String getAreaMapAt(
-            @P("最小坐标三整数数组 [x,y,z]，包含；直接复制 searchVoxelRegion.bounds.min") int[] min,
-            @P("最大坐标三整数数组 [x,y,z]，不包含；直接复制 searchVoxelRegion.bounds.max_exclusive") int[] max_exclusive,
+            @P("最小坐标三整数数组 [x,y,z]，包含；直接复制 CLMCP 搜索结果 bounds.min") int[] min,
+            @P("最大坐标三整数数组 [x,y,z]，不包含；直接复制 CLMCP 搜索结果 bounds.max_exclusive") int[] max_exclusive,
             @P("要显示的最小绝对Y，包含；必须位于bounds内，通常使用当前已知地面Y-1") int mapMinY,
             @P("要显示的最大绝对Y，不包含；最多比mapMinY大5，通常使用当前已知地面Y+4") int mapMaxYExclusive) {
         RegionPathPlanner.Bounds bounds;
@@ -586,11 +586,11 @@ public class PerceptionTools {
         return result.toString();
     }
 
-    @Tool("在指定绝对坐标半开区间内模糊搜索方块名称。min 与 max_exclusive 必须直接复制 searchVoxelRegion 返回的三整数数组，格式为 min:[x,y,z]、max_exclusive:[x,y,z]，不要拆分或重排坐标。")
+    @Tool("在指定绝对坐标半开区间内模糊搜索方块名称。min 与 max_exclusive 必须直接复制 CLMCP 搜索结果返回的三整数数组，格式为 min:[x,y,z]、max_exclusive:[x,y,z]，不要拆分或重排坐标。")
     public String findSpecificBlocksInBounds(
             @P("要查找的方块名称或ID片段，如'door', 'stairs', 'dark_oak'") String blockNameQuery,
-            @P("最小坐标三整数数组 [x,y,z]，包含；直接复制 searchVoxelRegion.bounds.min") int[] min,
-            @P("最大坐标三整数数组 [x,y,z]，不包含；直接复制 searchVoxelRegion.bounds.max_exclusive") int[] max_exclusive,
+            @P("最小坐标三整数数组 [x,y,z]，包含；直接复制 CLMCP 搜索结果 bounds.min") int[] min,
+            @P("最大坐标三整数数组 [x,y,z]，不包含；直接复制 CLMCP 搜索结果 bounds.max_exclusive") int[] max_exclusive,
             @P("最多返回多少个坐标(1-100，建议30)") int limit) {
         if (blockNameQuery == null || blockNameQuery.isBlank()) {
             return "方块名称查询不能为空。";

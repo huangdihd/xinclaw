@@ -27,12 +27,15 @@ final class AgentManagerRegionToolPromptTest {
         assertTrue(prompt.contains("max_exclusive"));
         assertTrue(prompt.contains("bounds"));
         assertTrue(prompt.contains("CLMCP Rank 1"));
-        assertTrue(prompt.contains("如果工具列表中提供 getLoadedVoxelSearchPlan 和 searchVoxelRegion"));
+        assertTrue(prompt.contains("如果工具列表中提供 searchLoadedVoxelRegions"));
         assertTrue(prompt.contains("开放词汇寻找结构或对象"));
         assertTrue(prompt.contains("必须保留用户目标中的完整判别性名词短语"));
         assertTrue(prompt.contains("pillager outpost watchtower"));
         assertTrue(prompt.contains("不得缩短成 watchtower"));
-        assertTrue(prompt.contains("必须优先调用 getLoadedVoxelSearchPlan"));
+        assertTrue(prompt.contains("必须优先调用 searchLoadedVoxelRegions"));
+        assertTrue(prompt.contains("一次调用"));
+        assertFalse(prompt.contains("getLoadedVoxelSearchPlan"));
+        assertFalse(prompt.contains("完成全部计划调用"));
         assertTrue(prompt.contains("不得先平铺 getAreaMapAt"));
         assertTrue(prompt.contains("语义候选区域，不是精确站立点或入口"));
         assertTrue(prompt.contains("Rank 1 的 min/max_exclusive 数组原样传给 getAreaMapAt"));
@@ -48,7 +51,7 @@ final class AgentManagerRegionToolPromptTest {
             int[].class, int[].class, int.class, int.class
         );
         String areaMapDescription = String.join("\n", areaMapAt.getAnnotation(Tool.class).value());
-        assertTrue(areaMapDescription.contains("直接使用 searchVoxelRegion 返回"));
+        assertTrue(areaMapDescription.contains("searchLoadedVoxelRegions 或 searchVoxelRegion 返回"));
         assertTrue(areaMapDescription.contains("Rank-1 bounds"));
         assertTrue(areaMapDescription.contains("候选内部的几何细化"));
         assertTrue(areaMapDescription.contains("不得脱离候选范围扫描任意远程坐标"));
