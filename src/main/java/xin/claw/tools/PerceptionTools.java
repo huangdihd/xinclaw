@@ -85,6 +85,19 @@ public class PerceptionTools {
         return sb.length() == 0 ? "原地" : sb.toString().trim();
     }
 
+    /** 把方块状态属性格式化为 [k=v,k=v]；无属性（如石头）返回空串。供搜索与扫描结果附带 open 等状态。 */
+    static String formatState(BlockState state) {
+        if (state == null || state.properties() == null || state.properties().isEmpty()) return "";
+        StringBuilder sb = new StringBuilder("[");
+        boolean first = true;
+        for (Map.Entry<String, String> entry : state.properties().entrySet()) {
+            if (!first) sb.append(',');
+            sb.append(entry.getKey()).append('=').append(entry.getValue());
+            first = false;
+        }
+        return sb.append(']').toString();
+    }
+
     @Tool("环顾四周：一次性获取脚下/身体/头顶的方块、东南西北四个方向的通畅情况、头顶净空、以及附近的危险方块(岩浆/火/仙人掌等)。这是了解自身处境的首选感知工具。")
     public String scanSurroundings() {
         logger.info("[AI Tool Call] 调用了 scanSurroundings()");
@@ -510,9 +523,9 @@ public class PerceptionTools {
         return result.toString();
     }
 
-    @Tool("获取机器人周围指定半径内特定方块（根据名称模糊匹配）的具体坐标位置。用于寻找特定的方块，如'工作台'、'钻石矿'等。")
+    @Tool("获取机器人周围指定半径内特定方块（根据名称模糊匹配）的具体坐标位置，结果附带方块状态（如门 open=true/false、facing 朝向）。用于寻找特定的方块，如'door'(找所有门)、'工作台'、'钻石矿'等。搜到门/活板门后先看 open 状态：open=false 表示关着，可用 interactBlock 右键打开。")
     public String findSpecificBlocks(
-            @P("要查找的方块名称(英文或ID的一部分，如'diamond', 'crafting', 'log')") String blockNameQuery,
+            @P("要查找的方块名称(英文或ID的一部分，如'door', 'diamond', 'crafting', 'log')") String blockNameQuery,
             @P("搜索半径(方块距离，建议10-30)") double radius) {
         logger.info("[AI Tool Call] 调用了 findSpecificBlocks(query='{}', radius={})", blockNameQuery, radius);
         
@@ -537,7 +550,7 @@ public class PerceptionTools {
         }
 
         String lowerQuery = blockNameQuery.toLowerCase();
-        record FoundBlock(int x, int y, int z, double dist, String name) {}
+        record FoundBlock(int x, int y, int z, double dist, String name, String stateSuffix) {}
         java.util.List<FoundBlock> found = new java.util.ArrayList<>();
 
         int cx = (int) Math.floor(center.x);
@@ -556,7 +569,7 @@ public class PerceptionTools {
                     String blockName = state.blockName();
 
                     if (blockName.toLowerCase().contains(lowerQuery) && !blockName.toLowerCase().contains("air")) {
-                        found.add(new FoundBlock(x, y, z, dist, blockName));
+                        found.add(new FoundBlock(x, y, z, dist, blockName, formatState(state)));
                     }
                 }
             }
@@ -576,8 +589,8 @@ public class PerceptionTools {
 
         for (int i = 0; i < shown; i++) {
             FoundBlock b = found.get(i);
-            result.append(String.format("- %s (%d,%d,%d) 距离%.1f格 [%s]\n",
-                    b.name(), b.x(), b.y(), b.z(), b.dist(), relativeDesc(b.x() - cx, b.y() - cy, b.z() - cz)));
+            result.append(String.format("- %s%s (%d,%d,%d) 距离%.1f格 [%s]%n",
+                    b.name(), b.stateSuffix(), b.x(), b.y(), b.z(), b.dist(), relativeDesc(b.x() - cx, b.y() - cy, b.z() - cz)));
         }
         if (found.size() > shown) {
             result.append("...其余 ").append(found.size() - shown).append(" 个更远的已省略。");
@@ -586,7 +599,7 @@ public class PerceptionTools {
         return result.toString();
     }
 
-    @Tool("在指定绝对坐标半开区间内模糊搜索方块名称。min 与 max_exclusive 必须直接复制 CLMCP 搜索结果返回的三整数数组，格式为 min:[x,y,z]、max_exclusive:[x,y,z]，不要拆分或重排坐标。")
+    @Tool("在指定绝对坐标半开区间内模糊搜索方块名称，结果附带方块状态（如门 open=true/false、facing 朝向）。min 与 max_exclusive 必须直接复制 CLMCP 搜索结果返回的三整数数组，格式为 min:[x,y,z]、max_exclusive:[x,y,z]，不要拆分或重排坐标。搜到门后先看 open：open=false 表示关着，可用 interactBlock 右键打开。")
     public String findSpecificBlocksInBounds(
             @P("要查找的方块名称或ID片段，如'door', 'stairs', 'dark_oak'") String blockNameQuery,
             @P("最小坐标三整数数组 [x,y,z]，包含；直接复制 CLMCP 搜索结果 bounds.min") int[] min,
@@ -629,7 +642,7 @@ public class PerceptionTools {
         int referenceZ = (int) Math.floor(reference.z);
         int outputLimit = Math.max(1, Math.min(100, limit));
         String lowerQuery = blockNameQuery.toLowerCase();
-        record FoundBlock(int x, int y, int z, double distance, String name) {}
+        record FoundBlock(int x, int y, int z, double distance, String name, String stateSuffix) {}
         java.util.List<FoundBlock> found = new java.util.ArrayList<>();
 
         for (int x = minX; x < maxXExclusive; x++) {
@@ -640,7 +653,7 @@ public class PerceptionTools {
                     String name = state.blockName();
                     String lowerName = name.toLowerCase();
                     if (lowerName.contains(lowerQuery) && !lowerName.contains("air")) {
-                        found.add(new FoundBlock(x, y, z, reference.distance(new Vector3d(x, y, z)), name));
+                        found.add(new FoundBlock(x, y, z, reference.distance(new Vector3d(x, y, z)), name, formatState(state)));
                     }
                 }
             }
@@ -664,8 +677,8 @@ public class PerceptionTools {
         for (int index = 0; index < shown; index++) {
             FoundBlock block = found.get(index);
             result.append(String.format(
-                "- %s (%d,%d,%d) 距离%.1f格 [%s]\n",
-                block.name(), block.x(), block.y(), block.z(), block.distance(),
+                "- %s%s (%d,%d,%d) 距离%.1f格 [%s]%n",
+                block.name(), block.stateSuffix(), block.x(), block.y(), block.z(), block.distance(),
                 relativeDesc(block.x() - referenceX, block.y() - referenceY, block.z() - referenceZ)
             ));
         }

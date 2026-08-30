@@ -139,7 +139,7 @@ public class ActionTools {
         return "已松开物品。";
     }
 
-    @Tool("对指定的方块进行交互（点击按钮、放置方块等）。")
+    @Tool("对指定的方块进行交互（右键点击）：可打开或关闭木门/活板门/栅栏门（找到 open=false 的门后，对门的下半部分坐标使用本工具即可开门）、按按钮、拉拉杆、点击按钮开门，也可放置方块或打开箱子。")
     public String interactBlock(
             @P("X") int x, @P("Y") int y, @P("Z") int z,
             @P("面: DOWN, UP, NORTH, SOUTH, WEST, EAST") String directionStr) {
