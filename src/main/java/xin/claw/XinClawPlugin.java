@@ -123,9 +123,9 @@ public class XinClawPlugin implements Plugin {
                 if (agentManager.isProcessing()) return;
 
                 List<Task> tasks = agentManager.getTaskManager().getTasks();
-                boolean hasInProgress = tasks.stream().anyMatch(t -> t.getStatus() == Task.Status.IN_PROGRESS);
+                boolean hasPending = hasPendingTasks(tasks);
 
-                if (hasInProgress) {
+                if (hasPending) {
                     logger.info("[TaskLoop] 发现正在进行中的任务，唤醒 AI 继续工作...");
                     
                     String statusContext = "";
@@ -187,6 +187,10 @@ public class XinClawPlugin implements Plugin {
                 logger.error("Error in task loop", e);
             }
         }, 30, PluginConfig.taskLoopIntervalSeconds, TimeUnit.SECONDS); // 启动后延迟 30 秒开始
+    }
+
+    static boolean hasPendingTasks(List<Task> tasks) {
+        return tasks.stream().anyMatch(task -> task.getStatus() != Task.Status.DONE);
     }
 
     @Override

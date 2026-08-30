@@ -48,6 +48,21 @@ final class RegionToolSchemaTest {
         assertIntegerArray(properties.get("max_exclusive"), properties.toString());
     }
 
+    @Test
+    void boundedMapPublishesSearchBoundsArrays() {
+        ToolSpecification specification = ToolSpecifications.toolSpecificationsFrom(PerceptionTools.class)
+            .stream()
+            .filter(tool -> tool.name().equals("getAreaMapAt"))
+            .findFirst()
+            .orElseThrow();
+
+        Map<String, Map<String, Object>> properties = specification.parameters().properties();
+        assertIntegerArray(properties.get("min"), properties.toString());
+        assertIntegerArray(properties.get("max_exclusive"), properties.toString());
+        assertNotNull(properties.get("mapMinY"));
+        assertNotNull(properties.get("mapMaxYExclusive"));
+    }
+
     private static void assertIntegerArray(Map<String, Object> schema, String actualProperties) {
         assertNotNull(schema, actualProperties);
         assertEquals("array", schema.get("type"));

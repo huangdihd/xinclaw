@@ -34,6 +34,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import xin.claw.trace.AgentTracePublisher;
 
 public class PersistentChatMemoryStore implements ChatMemoryStore {
     private static final Logger logger = LoggerFactory.getLogger(PersistentChatMemoryStore.class);
@@ -42,11 +43,19 @@ public class PersistentChatMemoryStore implements ChatMemoryStore {
         java.util.concurrent.ConcurrentHashMap.newKeySet();
     private final java.util.concurrent.atomic.AtomicLong completedToolExecutionCount =
         new java.util.concurrent.atomic.AtomicLong();
+    private final java.util.Set<String> recordedToolCallIds =
+        java.util.concurrent.ConcurrentHashMap.newKeySet();
+    private final AgentTracePublisher trace;
 
     public PersistentChatMemoryStore(String pluginDir) {
+        this(pluginDir, new AgentTracePublisher());
+    }
+
+    public PersistentChatMemoryStore(String pluginDir, AgentTracePublisher trace) {
         this.filePath = new File(pluginDir + File.separator + "chat-memory.json").toPath();
+        this.trace = java.util.Objects.requireNonNull(trace, "trace");
         ensureFileExists();
-        recordCompletedToolExecutions(getMessages("default"));
+        seedRecordedToolExecutions(getMessages("default"));
     }
 
     private void ensureFileExists() {
@@ -161,7 +170,7 @@ public class PersistentChatMemoryStore implements ChatMemoryStore {
     public void updateMessages(Object memoryId, List<ChatMessage> messages) {
         try {
             List<ChatMessage> normalized = collapseConsecutiveDuplicateFinalAiMessages(messages);
-            recordCompletedToolExecutions(normalized);
+            recordNewToolEvents(normalized);
             String json = ChatMessageSerializer.messagesToJson(normalized);
             Files.write(filePath, json.getBytes(StandardCharsets.UTF_8));
         } catch (IOException e) {
@@ -175,6 +184,7 @@ public class PersistentChatMemoryStore implements ChatMemoryStore {
             Files.write(filePath, "[]".getBytes(StandardCharsets.UTF_8));
             completedToolExecutionIds.clear();
             completedToolExecutionCount.set(0L);
+            recordedToolCallIds.clear();
         } catch (IOException e) {
             logger.error("Failed to clear messages in store", e);
         }
@@ -184,8 +194,13 @@ public class PersistentChatMemoryStore implements ChatMemoryStore {
         return completedToolExecutionCount.get();
     }
 
-    private void recordCompletedToolExecutions(List<ChatMessage> messages) {
+    private void seedRecordedToolExecutions(List<ChatMessage> messages) {
         for (ChatMessage message : messages) {
+            if (message instanceof AiMessage ai && ai.hasToolExecutionRequests()) {
+                for (ToolExecutionRequest request : ai.toolExecutionRequests()) {
+                    recordedToolCallIds.add(toolCallKey(request));
+                }
+            }
             if (message instanceof ToolExecutionResultMessage result) {
                 String id = result.id();
                 if (id != null && !id.isBlank() && completedToolExecutionIds.add(id)) {
@@ -193,5 +208,36 @@ public class PersistentChatMemoryStore implements ChatMemoryStore {
                 }
             }
         }
+    }
+
+    private void recordNewToolEvents(List<ChatMessage> messages) {
+        for (ChatMessage message : messages) {
+            if (message instanceof AiMessage ai && ai.hasToolExecutionRequests()) {
+                for (ToolExecutionRequest request : ai.toolExecutionRequests()) {
+                    if (!recordedToolCallIds.add(toolCallKey(request))) continue;
+                    com.google.gson.JsonObject payload = new com.google.gson.JsonObject();
+                    payload.addProperty("id", request.id());
+                    payload.addProperty("tool", request.name());
+                    payload.addProperty("arguments", request.arguments());
+                    trace.emit("tool_call", payload);
+                }
+            }
+            if (message instanceof ToolExecutionResultMessage result) {
+                String key = result.id() != null && !result.id().isBlank()
+                    ? result.id() : result.toolName() + "\u0000" + result.text();
+                if (!completedToolExecutionIds.add(key)) continue;
+                completedToolExecutionCount.incrementAndGet();
+                com.google.gson.JsonObject payload = new com.google.gson.JsonObject();
+                payload.addProperty("id", result.id());
+                payload.addProperty("tool", result.toolName());
+                payload.addProperty("result", result.text());
+                trace.emit("tool_result", payload);
+            }
+        }
+    }
+
+    private static String toolCallKey(ToolExecutionRequest request) {
+        if (request.id() != null && !request.id().isBlank()) return request.id();
+        return request.name() + "\u0000" + request.arguments();
     }
 }

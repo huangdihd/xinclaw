@@ -58,6 +58,23 @@ low_health_threshold=10.0
 private_message_blacklist=back,help
 ```
 
+### DeepSeek SSE 与运行轨迹
+
+当模型名包含 `deepseek` 时，XinClaw 使用原生 OpenAI-compatible SSE 适配器。若
+`enable_thinking=true`，它会分别处理 `reasoning_content`、可见 `content` 和分片
+`tool_calls`，并在工具续调用中按协议回传 reasoning。若网关偶发返回只有 reasoning、
+没有 content/tool call 的终态，同一请求最多原样重试一次，不会把思维内容伪装成回复。
+
+`AgentManager.subscribeTrace(...)` 可订阅有序的 monotonic runtime trace，包括模型请求、
+reasoning/content 流片段、模型响应、工具参数、完整工具返回、Agent 输入/输出及错误。
+Benchmark 等外部插件应直接订阅该接口，不应再解析控制台日志。
+
+若工具列表提供 CLMCP，开放词汇结构定位会优先执行完整 CLMCP 计划；模型自行选择
+`topK=1..8`。全局 Rank-1 只表示语义候选区域，不是入口或精确站立点。Agent 可在该
+bounds 内用 `getAreaMapAt(min, max_exclusive, mapMinY, mapMaxYExclusive)` 一次覆盖候选 XZ
+并细化 footprint、地面和入口，再选择精确点寻路；普通任意中心地图使用
+`getAreaMapAtPoint`，不得脱离候选范围用远程地图重新做全局扫描。
+
 ## 🎮 指令使用
 
 - **控制台指令**：

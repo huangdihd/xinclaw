@@ -17,6 +17,7 @@
 
 package xin.claw;
 
+import com.google.gson.JsonObject;
 import dev.langchain4j.memory.ChatMemory;
 import dev.langchain4j.memory.chat.MessageWindowChatMemory;
 import dev.langchain4j.model.chat.StreamingChatLanguageModel;
@@ -32,6 +33,8 @@ import java.util.regex.Pattern;
 import xin.claw.memory.PersistentChatMemoryStore;
 import xin.claw.tasks.TaskManager;
 import xin.claw.tools.*;
+import xin.claw.trace.AgentTraceListener;
+import xin.claw.trace.AgentTracePublisher;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -66,7 +69,8 @@ public class AgentManager {
             "4. 感知工具的选择：想快速了解自身处境(脚下/四向/危险)时优先用 scanSurroundings；想直观理解周围布局、规划路线或建筑时用 getAreaMap 获取俯视字符地图(上北下南左西右东)；找特定方块用 findSpecificBlocks，其结果已按距离从近到远排序并附带相对方位。",
             "5. 区域作用域与行动验证：当 searchVoxelRegion 返回语义候选 bounds 后，旧的当前位置工具仍可用于普通任务，但不要丢弃候选区域。调用 findSpecificBlocksInBounds、findReachablePointInBounds、previewPathToBounds 或 pathfindToBounds 时，必须把 bounds.min 和 bounds.max_exclusive 两个 [x,y,z] 数组原样复制到同名参数，禁止拆成六个数或重排坐标。",
             "6. 路线预览：previewPathTo 是绝对坐标点的只读路径预览，决定执行后再调用 pathfindTo；previewPathToBounds 是候选半开区域的只读路径预览，决定执行后再调用 pathfindToBounds。两者都只计算并返回选定目标、寻路节点和移动类型，不会设置导航目标或移动机器人。需要先理解从哪一侧接近、最后几步落在哪里时可以调用。",
-            "7. 对于『寻找并前往目标』的导航任务，CLMCP Rank 1 是需要通过行动验证的最佳语义假设：默认立即调用 pathfindToBounds 前往 Rank 1。不得在远处用 getAreaMapAt 重新判断结构类别，因为字符方块切片不具备完整三维语义。到达候选后，才使用 getAreaMapAt、findSpecificBlocksInBounds 等局部工具寻找入口、楼梯和内部；只有在候选被局部证伪后才尝试下一 rank。",
+            "7. 如果工具列表中提供 getLoadedVoxelSearchPlan 和 searchVoxelRegion，执行开放词汇寻找结构或对象的任务时必须优先调用 getLoadedVoxelSearchPlan，再按计划完成 CLMCP 搜索并跨调用比较全局候选；不得先平铺 getAreaMapAt 或用全局方块查询代替 CLMCP。CLMCP keyword 必须保留用户目标中的完整判别性名词短语，例如用户要求 pillager outpost watchtower 就原样使用该短语，不得缩短成 watchtower 等更泛化词。只有没有这两个工具时，才使用普通地图/方块启发式做全局定位。",
+            "8. 对于『寻找并前往目标』的导航任务，CLMCP Rank 1 是语义候选区域，不是精确站立点或入口。完成全部计划调用并跨调用确认全局 Rank 1 后，保留原始 bounds；不要直接把整个宽 bounds 交给 pathfindToBounds 并假设最近可达点就是结构本体。把 Rank 1 的 min/max_exclusive 数组原样传给 getAreaMapAt，并用当前已知地面Y选择 mapMinY=地面Y-1、mapMaxYExclusive=地面Y+4，以一次覆盖候选XZ和入口层，定位 footprint、入口、楼梯和内部。随后选择或预览精确可达点，再调用 pathfindTo；只有候选内证据证伪 Rank 1 后才尝试下一 rank。",
             "【工具行动铁律】",
             "- 收到需要在游戏中执行、搜索、移动、建造、交互或管理任务的指令时，必须在当前回复中调用至少一个实际工具；不允许把行动推迟到下一轮。",
             "- 禁止只说『我会开始』『I'll start』『接下来我将……』『Let me...』然后不调用工具。口头承诺不是行动，也不能作为本轮的最终回复。",
@@ -84,12 +88,14 @@ public class AgentManager {
     private BotAgent agent;
     private TaskManager taskManager;
     private final AgentToolRegistry toolRegistry;
+    private final AgentTracePublisher tracePublisher;
     private PersistentChatMemoryStore memoryStore;
     public final java.util.concurrent.atomic.AtomicReference<Thread> processingThread = new java.util.concurrent.atomic.AtomicReference<>(null);
     private final java.util.concurrent.atomic.AtomicBoolean memoryClearRequested = new java.util.concurrent.atomic.AtomicBoolean(false);
 
     public AgentManager() {
         this.taskManager = new TaskManager();
+        this.tracePublisher = new AgentTracePublisher();
         this.toolRegistry = new AgentToolRegistry(java.util.List.of(
             new MovementTools(),
             new PerceptionTools(),
@@ -108,11 +114,11 @@ public class AgentManager {
     }
 
     public synchronized void initAgent() {
-        StreamingChatLanguageModel model = buildStreamingModel();
+        StreamingChatLanguageModel model = buildStreamingModel(tracePublisher);
 
         // Setup persistent chat memory
         String configDir = PluginConfig.getDataDir().getAbsolutePath();
-        this.memoryStore = new PersistentChatMemoryStore(configDir);
+        this.memoryStore = new PersistentChatMemoryStore(configDir, tracePublisher);
         this.memoryStore.repairConversation("default");
 
         int maxMessages = PluginConfig.maxMemoryMessages > 0 ? PluginConfig.maxMemoryMessages : Integer.MAX_VALUE;
@@ -129,6 +135,24 @@ public class AgentManager {
     }
 
     static StreamingChatLanguageModel buildStreamingModel() {
+        return buildStreamingModel(new AgentTracePublisher());
+    }
+
+    static StreamingChatLanguageModel buildStreamingModel(AgentTracePublisher tracePublisher) {
+        if (PluginConfig.modelName != null
+            && PluginConfig.modelName.toLowerCase(java.util.Locale.ROOT).contains("deepseek")) {
+            return new SingleTerminalStreamingChatLanguageModel(
+                new DeepSeekThinkingStreamingChatLanguageModel(
+                    PluginConfig.apiKey,
+                    PluginConfig.apiBaseUrl,
+                    PluginConfig.modelName,
+                    configuredApiTimeout(),
+                    PluginConfig.enableThinking,
+                    "high",
+                    tracePublisher
+                )
+            );
+        }
         var builder = OpenAiStreamingChatModel.builder()
                 .apiKey(PluginConfig.apiKey)
                 .modelName(PluginConfig.modelName)
@@ -138,6 +162,10 @@ public class AgentManager {
             builder.baseUrl(PluginConfig.apiBaseUrl.trim());
         }
         return new SingleTerminalStreamingChatLanguageModel(builder.build());
+    }
+
+    public AutoCloseable subscribeTrace(AgentTraceListener listener) {
+        return tracePublisher.subscribe(listener);
     }
 
     static Duration configuredApiTimeout() {
@@ -268,17 +296,28 @@ public class AgentManager {
             if (memoryStoreForCall != null) {
                 memoryStoreForCall.repairConversation("default");
             }
-            return executeWithActionGuard(
+            JsonObject inputTrace = new JsonObject();
+            inputTrace.addProperty("text", message);
+            tracePublisher.emit("agent_input", inputTrace);
+            String response = executeWithActionGuard(
                 agentForCall,
                 message,
                 () -> memoryStoreForCall == null ? 0L : memoryStoreForCall.completedToolExecutionCount()
             );
+            JsonObject outputTrace = new JsonObject();
+            outputTrace.addProperty("text", response);
+            tracePublisher.emit("agent_output", outputTrace);
+            return response;
         } catch (Exception e) {
             boolean isInterrupted = current.isInterrupted() || e.getCause() instanceof InterruptedException || e.toString().toLowerCase().contains("interrupted");
             if (isInterrupted) {
                 logger.info("AI processing was interrupted.");
                 return ""; // 被打断时返回空字符串，不输出错误
             }
+            JsonObject errorTrace = new JsonObject();
+            errorTrace.addProperty("error_type", e.getClass().getName());
+            errorTrace.addProperty("message", String.valueOf(e.getMessage()));
+            tracePublisher.emit("agent_error", errorTrace);
             logger.error("Agent error during processing:", e);
             return "Agent error: " + e.getMessage();
         } finally {
@@ -436,7 +475,7 @@ public class AgentManager {
     private void doClearMemoryNow() {
         if (memoryStore == null) {
             String configDir = PluginConfig.getDataDir().getAbsolutePath();
-            memoryStore = new PersistentChatMemoryStore(configDir);
+            memoryStore = new PersistentChatMemoryStore(configDir, tracePublisher);
         }
         memoryStore.deleteMessages("default");
         initAgent();

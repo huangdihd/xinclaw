@@ -253,8 +253,50 @@ public class PerceptionTools {
         return sb.toString();
     }
 
-    @Tool("生成以任意绝对坐标为中心的俯视分层字符地图，不会移动机器人。普通地图分析任务可用于查看指定区域。对于『寻找并前往目标』的 CLMCP 导航任务，到达前不得用本工具远程重新判断候选的结构类别；应先 pathfindToBounds 到达候选，再用本工具局部检查墙体、入口和内部布局。方向: 上=北(-Z)，下=南(+Z)，左=西(-X)，右=东(+X)。")
+    @Tool("直接使用 searchVoxelRegion 返回的半开 bounds 生成候选区域俯视分层地图，不会移动机器人。min 与 max_exclusive 必须原样复制 Rank-1 bounds；mapMinY/mapMaxYExclusive 选择 bounds 内最多5个绝对Y层。用于 CLMCP 候选内部的几何细化、入口和内部定位；不得脱离候选范围扫描任意远程坐标。水平边长最多32格。")
     public String getAreaMapAt(
+            @P("最小坐标三整数数组 [x,y,z]，包含；直接复制 searchVoxelRegion.bounds.min") int[] min,
+            @P("最大坐标三整数数组 [x,y,z]，不包含；直接复制 searchVoxelRegion.bounds.max_exclusive") int[] max_exclusive,
+            @P("要显示的最小绝对Y，包含；必须位于bounds内，通常使用当前已知地面Y-1") int mapMinY,
+            @P("要显示的最大绝对Y，不包含；最多比mapMinY大5，通常使用当前已知地面Y+4") int mapMaxYExclusive) {
+        RegionPathPlanner.Bounds bounds;
+        try {
+            bounds = RegionPathPlanner.Bounds.fromArrays(min, max_exclusive);
+        } catch (IllegalArgumentException error) {
+            return "无效 bounds：" + error.getMessage();
+        }
+        int width = bounds.maxXExclusive() - bounds.minX();
+        int depth = bounds.maxZExclusive() - bounds.minZ();
+        if (width > 32 || depth > 32) {
+            return "候选地图水平边长不得超过32格；请缩小 bounds。";
+        }
+        if (mapMinY < bounds.minY() || mapMaxYExclusive > bounds.maxYExclusive()
+                || mapMaxYExclusive <= mapMinY) {
+            return "绝对Y层必须是 bounds 内的正半开区间。";
+        }
+        if (mapMaxYExclusive - mapMinY > 5) {
+            return "候选地图最多5层；请缩小绝对Y范围。";
+        }
+        int centerX = (bounds.minX() + bounds.maxXExclusive() - 1) / 2;
+        int centerZ = (bounds.minZ() + bounds.maxZExclusive() - 1) / 2;
+        int radius = Math.max(2, Math.max((width + 1) / 2, (depth + 1) / 2));
+        logger.info(
+            "[AI Tool Call] 调用了 getAreaMapAt(min=[{},{},{}], max_exclusive=[{},{},{}], mapY=[{},{}))",
+            bounds.minX(), bounds.minY(), bounds.minZ(), bounds.maxXExclusive(),
+            bounds.maxYExclusive(), bounds.maxZExclusive(), mapMinY, mapMaxYExclusive
+        );
+        return String.format(
+            "来源 bounds=[[%d,%d,%d],[%d,%d,%d])，绝对Y层=[%d,%d)。水平投影以中心(%d,%d)、半径%d完整覆盖候选；偶数边长可能含1格居中余量。%n",
+            bounds.minX(), bounds.minY(), bounds.minZ(), bounds.maxXExclusive(),
+            bounds.maxYExclusive(), bounds.maxZExclusive(), mapMinY, mapMaxYExclusive,
+            centerX, centerZ, radius
+        ) + getAreaMapAtPoint(
+            centerX, mapMinY, centerZ, radius, 0, mapMaxYExclusive - mapMinY - 1
+        );
+    }
+
+    @Tool("生成以任意绝对坐标为中心的俯视分层字符地图，不会移动机器人。用于普通地图分析；CLMCP 导航任务的候选细化应优先使用接收 Rank-1 bounds 的 getAreaMapAt，避免手算中心和半径。方向: 上=北(-Z)，下=南(+Z)，左=西(-X)，右=东(+X)。")
+    public String getAreaMapAtPoint(
             @P("地图中心 X 绝对坐标") int centerX,
             @P("地图中心 Y 绝对坐标") int centerY,
             @P("地图中心 Z 绝对坐标") int centerZ,
@@ -262,7 +304,7 @@ public class PerceptionTools {
             @P("起始层相对中心Y的偏移") int yFrom,
             @P("结束层相对中心Y的偏移，最多显示5层") int yTo) {
         logger.info(
-            "[AI Tool Call] 调用了 getAreaMapAt(center=({},{},{}), radius={}, yFrom={}, yTo={})",
+            "[AI Tool Call] 调用了 getAreaMapAtPoint(center=({},{},{}), radius={}, yFrom={}, yTo={})",
             centerX, centerY, centerZ, radius, yFrom, yTo
         );
 

@@ -67,11 +67,40 @@ final class PerceptionToolsRegionTest {
         blocks.put("101,70,200", block("cobblestone", "block"));
         PerceptionTools tools = tools(blocks, new Vector3d(98.5, 70, 200.5));
 
-        String result = tools.getAreaMapAt(100, 70, 200, 2, 0, 0);
+        String result = tools.getAreaMapAtPoint(100, 70, 200, 2, 0, 0);
 
         assertTrue(result.contains("以指定中心(100, 70, 200)"));
         assertTrue(result.contains("+=指定中心"));
         assertTrue(result.contains("@=你"));
         assertTrue(result.contains("A=cobblestone"));
+    }
+
+    @Test
+    void rendersCandidateMapFromHalfOpenBoundsAndAbsoluteYLayers() {
+        Map<String, BlockState> blocks = new HashMap<>();
+        blocks.put("10,71,20", block("oak_planks", "block"));
+        blocks.put("13,72,23", block("cobblestone", "block"));
+        PerceptionTools tools = tools(blocks, new Vector3d(30.5, 71, 30.5));
+
+        String result = tools.getAreaMapAt(
+            new int[] {10, 64, 20}, new int[] {14, 96, 24}, 70, 75
+        );
+
+        assertTrue(result.contains("来源 bounds=[[10,64,20],[14,96,24])"));
+        assertTrue(result.contains("绝对Y层=[70,75)"));
+        assertTrue(result.contains("oak_planks"));
+        assertTrue(result.contains("cobblestone"));
+    }
+
+    @Test
+    void boundedMapRejectsOversizedHorizontalOrVerticalProjection() {
+        PerceptionTools tools = tools(Map.of(), new Vector3d());
+
+        assertTrue(tools.getAreaMapAt(
+            new int[] {0, 0, 0}, new int[] {34, 10, 10}, 0, 5
+        ).contains("水平边长"));
+        assertTrue(tools.getAreaMapAt(
+            new int[] {0, 0, 0}, new int[] {10, 10, 10}, 0, 6
+        ).contains("最多5层"));
     }
 }
