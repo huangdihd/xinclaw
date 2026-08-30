@@ -299,6 +299,30 @@ final class AgentManagerStreamingTest {
         assertTrue(warnings.get() >= 1);
     }
 
+    @Test
+    void requestInterruptSignalsActiveThreadWithoutReleasingItsSlot() throws Exception {
+        CountDownLatch started = new CountDownLatch(1);
+        CountDownLatch interrupted = new CountDownLatch(1);
+        Thread active = new Thread(() -> {
+            started.countDown();
+            try {
+                Thread.sleep(60_000);
+            } catch (InterruptedException expected) {
+                interrupted.countDown();
+            }
+        });
+        AtomicReference<Thread> slot = new AtomicReference<>(active);
+        active.start();
+        assertTrue(started.await(1, java.util.concurrent.TimeUnit.SECONDS));
+
+        Thread requested = AgentManager.requestProcessingThreadInterrupt(slot);
+
+        assertSame(active, requested);
+        assertTrue(interrupted.await(1, java.util.concurrent.TimeUnit.SECONDS));
+        assertSame(active, slot.get(), "non-blocking request must not release the lifecycle slot");
+        active.join(1000);
+    }
+
     private static final class FakeTokenStream implements TokenStream {
         private final boolean fail;
         private final boolean emitTokens;

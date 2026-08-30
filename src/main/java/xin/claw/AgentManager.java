@@ -231,17 +231,32 @@ public class AgentManager {
         });
     }
 
-    public void interruptProcessing() {
-        // 先取消尚未开始执行的排队任务，防止等待旧线程期间它又启动新会话
+    /**
+     * 只请求中断当前 AI 处理，不等待 SSE 流到达终态，也不释放 processingThread 槽位。
+     * benchmark 硬截止使用此方法，以便先返回 episode_end；旧流仍由槽位隔离，不能与下一会话并发。
+     *
+     * @return 发出中断时占用处理槽位的线程；没有在途处理时返回 null
+     */
+    public Thread requestInterruptProcessing() {
         java.util.concurrent.Future<?> task = currentAgentTask;
         currentAgentTask = null;
         if (task != null && !task.isDone()) {
             task.cancel(true);
         }
+        return requestProcessingThreadInterrupt(processingThread);
+    }
 
-        Thread t = processingThread.get();
+    static Thread requestProcessingThreadInterrupt(
+        java.util.concurrent.atomic.AtomicReference<Thread> slot
+    ) {
+        Thread target = slot.get();
+        if (target != null) target.interrupt();
+        return target;
+    }
+
+    public void interruptProcessing() {
+        Thread t = requestInterruptProcessing();
         if (t == null) return;
-        t.interrupt();
         waitForProcessingThreadToFinish(
             processingThread,
             t,
