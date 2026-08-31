@@ -12,15 +12,15 @@ final class MovementToolsRegionApiTest {
     void publishesRegionNavigationWithoutRemovingLegacyMovementTools() throws Exception {
         assertNotNull(MovementTools.class.getMethod(
             "findReachablePointInBounds",
-            int[].class, int[].class
+            int[].class, int[].class, Boolean.class
         ).getAnnotation(Tool.class));
         assertNotNull(MovementTools.class.getMethod(
             "pathfindToBounds",
-            int[].class, int[].class, String.class
+            int[].class, int[].class, Boolean.class, String.class
         ).getAnnotation(Tool.class));
         Method previewPoint = MovementTools.class.getMethod(
             "previewPathTo",
-            double.class, double.class, double.class
+            double.class, double.class, double.class, Boolean.class
         );
         Tool previewPointTool = previewPoint.getAnnotation(Tool.class);
         assertNotNull(previewPointTool);
@@ -30,7 +30,7 @@ final class MovementToolsRegionApiTest {
 
         Method preview = MovementTools.class.getMethod(
             "previewPathToBounds",
-            int[].class, int[].class
+            int[].class, int[].class, Boolean.class
         );
         Tool previewTool = preview.getAnnotation(Tool.class);
         assertNotNull(previewTool);
@@ -42,7 +42,7 @@ final class MovementToolsRegionApiTest {
             "walkTo", double.class, double.class, double.class
         ));
         assertNotNull(MovementTools.class.getMethod(
-            "pathfindTo", double.class, double.class, double.class, String.class
+            "pathfindTo", double.class, double.class, double.class, Boolean.class, String.class
         ));
     }
 }

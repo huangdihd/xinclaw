@@ -61,7 +61,8 @@ final class MovementToolsPathCompatibilityTest {
 
         String output = MovementTools.formatPathPreview(
             target,
-            List.of(new Node(1, 64, 5), new Node(2, 64, 5), new Node(3, 64, 5))
+            List.of(new Node(1, 64, 5), new Node(2, 64, 5), new Node(3, 64, 5)),
+            false
         );
 
         assertTrue(output.contains("不会移动"));
@@ -77,7 +78,8 @@ final class MovementToolsPathCompatibilityTest {
     void formatsDirectPointPathPreview() {
         String output = MovementTools.formatDirectPathPreview(
             new Node(3, 64, 5),
-            List.of(new Node(1, 64, 5), new Node(2, 64, 5), new Node(3, 64, 5))
+            List.of(new Node(1, 64, 5), new Node(2, 64, 5), new Node(3, 64, 5)),
+            false
         );
 
         assertTrue(output.contains("不会移动"));
@@ -101,7 +103,8 @@ final class MovementToolsPathCompatibilityTest {
             List.of(
                 new RuntimePathStep(new Node(1, 64, 5), TestMovementType.WALK),
                 new RuntimePathStep(new Node(2, 65, 5), TestMovementType.CLIMB)
-            )
+            ),
+            false
         );
 
         assertTrue(output.contains("0:WALK@(1,64,5)"));
@@ -116,7 +119,7 @@ final class MovementToolsPathCompatibilityTest {
             new Node(99, 64, 5), 100, 1, 1
         );
 
-        String output = MovementTools.formatPathPreview(target, path);
+        String output = MovementTools.formatPathPreview(target, path, false);
 
         assertTrue(output.contains("omitted_middle_nodes=4"));
         assertTrue(output.contains("0:WALK@(0,64,5)"));

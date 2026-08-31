@@ -25,6 +25,7 @@ import org.slf4j.LoggerFactory;
 import xin.bbtt.MovementSync;
 import xin.bbtt.movements.WalkMovement;
 import xin.bbtt.movements.ActionMovement;
+import xin.bbtt.pathfinding.DefaultPathfindingContext;
 import xin.bbtt.pathfinding.DStarLite;
 import xin.bbtt.pathfinding.Node;
 import java.util.List;
@@ -32,6 +33,19 @@ import java.util.Optional;
 
 public class MovementTools {
     private static final Logger logger = LoggerFactory.getLogger(MovementTools.class);
+
+    /**
+     * Navigation is dig-free unless the agent explicitly opts in. Omitting the
+     * parameter (null) or passing false disables mining for the whole request:
+     * pre-check, auto-repath and region probes all keep terrain intact.
+     */
+    static boolean resolveAllowDig(Boolean allowDig) {
+        return Boolean.TRUE.equals(allowDig);
+    }
+
+    static void applyAllowDigPermission(Boolean allowDig) {
+        MovementSync.setAllowDigging(resolveAllowDig(allowDig));
+    }
 
     @Tool("让机器人行走(walk)到指定的绝对坐标点 x, y, z。这是一个持续性动作，大约每秒可以移动 4.3 格。")
     public String walkTo(
@@ -97,16 +111,19 @@ public class MovementTools {
         return "已在任务队列中添加了 " + durationMs + " 毫秒的等待时间。";
     }
 
-    @Tool("智能动态寻路到指定的绝对坐标点 x, y, z。会自动绕过障碍物、自动开路(挖方块)或搭桥。如果传入了taskId，当到达目标时该任务会自动被标记为 DONE。大约每秒移动 3-4 格。")
+    @Tool("智能动态寻路到指定的绝对坐标点 x, y, z。默认不挖掘(allowDig=false)：不会破坏任何方块，遇到障碍只绕行、跳跃或搭桥。allowDig=true 才允许挖掘挡路的方块；关着的门请用 interactBlock 打开，不要挖墙。如果传入了taskId，当到达目标时该任务会自动被标记为 DONE。大约每秒移动 3-4 格。")
     public String pathfindTo(
             @P("目标 X 坐标") double x,
             @P("目标 Y 坐标") double y,
             @P("目标 Z 坐标") double z,
+            @P(value = "是否允许寻路时挖掘挡路的方块；不填默认 false（不挖掘）。开门请用 interactBlock，不要靠挖掘穿墙", required = false)
+            Boolean allowDig,
             @P("绑定的任务ID (可选，填入对应的任务ID可以在到达目标后系统自动将其标记为 DONE，留空则不绑定)") String taskId) {
-        logger.info("[AI Tool Call] 调用了 pathfindTo(x={}, y={}, z={}, taskId={})", x, y, z, taskId);
+        logger.info("[AI Tool Call] 调用了 pathfindTo(x={}, y={}, z={}, allowDig={}, taskId={})", x, y, z, allowDig, taskId);
         if (MovementSync.INSTANCE == null || MovementSync.INSTANCE.movementController == null) {
             return "MovementSync 插件尚未就绪，无法移动。";
         }
+        applyAllowDigPermission(allowDig);
 
         Vector3d currentPos = MovementSync.INSTANCE.position.get();
         Node start = new Node((int) Math.floor(currentPos.x), (int) Math.floor(currentPos.y), (int) Math.floor(currentPos.z));
@@ -114,10 +131,10 @@ public class MovementTools {
 
         // 预检查路径是否通畅
         DStarLite pf = new DStarLite(start, goal, MovementSync.INSTANCE.getWorld());
-        List<Node> path = pf.findPath(2000); 
+        List<xin.bbtt.pathfinding.PathStep> path = pf.findPath(2000); 
 
         if (path == null || path.size() <= 1) {
-            return String.format("寻路失败：无法找到前往坐标 (%.1f, %.1f, %.1f) 的可行路径。目标可能在加载范围外，或者被完全封死。你可以尝试先向那个方向走一段路(walkTo)再重新寻路。", x, y, z);
+            return String.format("寻路失败：无法找到前往坐标 (%.1f, %.1f, %.1f) 的可行路径（当前挖掘许可：%s）。目标可能在加载范围外，或者被完全封死；关门建筑请先用 interactBlock 开门，或尝试先向那个方向走一段路(walkTo)再重新寻路。", x, y, z, resolveAllowDig(allowDig) ? "允许挖掘" : "禁止挖掘");
         }
 
         // 使用 MovementSync 1.3.3+ 内置的寻路引擎
@@ -130,22 +147,25 @@ public class MovementTools {
             xin.claw.XinClawPlugin.INSTANCE.currentMovementTaskId = taskId.trim();
         }
 
-        return String.format("已启动内置寻路引擎，寻路成功（包含 %d 个节点），开始前往坐标 (%.2f, %.2f, %.2f)。机器人会自动处理障碍物。", path.size(), x, y, z);
+        return String.format("已启动内置寻路引擎，寻路成功（包含 %d 个节点），开始前往坐标 (%.2f, %.2f, %.2f)。挖掘许可：%s。", path.size(), x, y, z, resolveAllowDig(allowDig) ? "允许挖掘挡路方块" : "不挖掘任何方块");
     }
 
     @Tool({
-        "预览前往指定绝对坐标点 x,y,z 的真实寻路路线，并返回寻路节点。",
+        "预览前往指定绝对坐标点 x,y,z 的真实寻路路线，并返回寻路节点。默认不挖掘(allowDig=false)：路线不会破坏任何方块。",
         "本工具不会移动机器人：不会设置 activeGoal、不会触发自动重寻路、不会修改移动任务，也不会向移动队列加入动作。",
         "用于在调用 pathfindTo 前查看路线如何接近目标以及最后几步落在哪里；决定执行后再单独调用 pathfindTo。"
     })
     public String previewPathTo(
             @P("目标 X 绝对坐标") double x,
             @P("目标 Y 绝对坐标") double y,
-            @P("目标 Z 绝对坐标") double z) {
-        logger.info("[AI Tool Call] 调用了 previewPathTo(x={}, y={}, z={})", x, y, z);
+            @P("目标 Z 绝对坐标") double z,
+            @P(value = "是否允许寻路时挖掘挡路的方块；不填默认 false（不挖掘）", required = false)
+            Boolean allowDig) {
+        logger.info("[AI Tool Call] 调用了 previewPathTo(x={}, y={}, z={}, allowDig={})", x, y, z, allowDig);
         if (MovementSync.INSTANCE == null || MovementSync.INSTANCE.getWorld() == null) {
             return "MovementSync 世界尚未就绪，无法预览寻路节点。";
         }
+        boolean digAllowed = resolveAllowDig(allowDig);
         Vector3d position = MovementSync.INSTANCE.position.get();
         if (position == null) return "路径预览失败：无法获取当前坐标。不会移动机器人。";
         Node start = new Node(
@@ -158,32 +178,35 @@ public class MovementTools {
             (int) Math.floor(y),
             (int) Math.floor(z)
         );
-        DStarLite pathfinder = new DStarLite(start, goal, MovementSync.INSTANCE.getWorld());
+        DStarLite pathfinder = new DStarLite(start, goal, new DefaultPathfindingContext(
+            MovementSync.INSTANCE.getWorld(), digAllowed));
         List<?> path = pathfinder.findPath(2000);
         if (path == null || path.isEmpty() || !goal.equals(pathEndpoint(path))) {
             return String.format(
-                "路径预览失败：无法找到前往绝对坐标 (%d,%d,%d) 的完整路线。不会移动机器人。",
-                goal.x, goal.y, goal.z
+                "路径预览失败：无法找到前往绝对坐标 (%d,%d,%d) 的完整路线（当前挖掘许可：%s）。不会移动机器人。",
+                goal.x, goal.y, goal.z, digAllowed ? "允许挖掘" : "禁止挖掘"
             );
         }
-        return formatDirectPathPreview(goal, path);
+        return formatDirectPathPreview(goal, path, digAllowed);
     }
 
-    @Tool("在指定半开区间内寻找最近可达站立点。min 与 max_exclusive 必须直接复制 CLMCP 搜索结果返回的 [x,y,z] 三整数数组，不要拆分或重排。不会移动机器人。")
+    @Tool("在指定半开区间内寻找最近可达站立点。min 与 max_exclusive 必须直接复制 CLMCP 搜索结果返回的 [x,y,z] 三整数数组，不要拆分或重排。默认不挖掘(allowDig=false)，路线不会破坏任何方块。不会移动机器人。")
     public String findReachablePointInBounds(
             @P("最小坐标 [x,y,z]，直接复制 CLMCP 搜索结果 bounds.min") int[] min,
-            @P("最大坐标 [x,y,z]，直接复制 CLMCP 搜索结果 bounds.max_exclusive") int[] max_exclusive) {
+            @P("最大坐标 [x,y,z]，直接复制 CLMCP 搜索结果 bounds.max_exclusive") int[] max_exclusive,
+            @P(value = "是否允许检查寻路时挖掘挡路的方块；不填默认 false（不挖掘）", required = false)
+            Boolean allowDig) {
         logger.info(
-            "[AI Tool Call] 调用了 findReachablePointInBounds(min={}, max_exclusive={})",
-            java.util.Arrays.toString(min), java.util.Arrays.toString(max_exclusive)
+            "[AI Tool Call] 调用了 findReachablePointInBounds(min={}, max_exclusive={}, allowDig={})",
+            java.util.Arrays.toString(min), java.util.Arrays.toString(max_exclusive), allowDig
         );
         if (MovementSync.INSTANCE == null || MovementSync.INSTANCE.getWorld() == null) {
             return "MovementSync 世界尚未就绪，无法检查区域可达点。";
         }
         try {
-            Optional<RegionPathPlanner.Result> result = findRegionTarget(min, max_exclusive);
+            Optional<RegionPathPlanner.Result> result = findRegionTarget(min, max_exclusive, resolveAllowDig(allowDig));
             if (result.isEmpty()) {
-                return "在指定半开区间内没有找到可通过寻路抵达的站立点。可缩小 bounds 或先移动到候选区域附近。";
+                return "在指定半开区间内没有找到可通过寻路抵达的站立点（当前挖掘许可：" + (resolveAllowDig(allowDig) ? "允许挖掘" : "禁止挖掘") + "）。可缩小 bounds 或先移动到候选区域附近。";
             }
             RegionPathPlanner.Result target = result.get();
             return String.format(
@@ -197,24 +220,27 @@ public class MovementTools {
     }
 
     @Tool({
-        "预览前往指定半开区间内最近可达站立点的真实寻路路线，返回选定目标和寻路节点。",
+        "预览前往指定半开区间内最近可达站立点的真实寻路路线，返回选定目标和寻路节点。默认不挖掘(allowDig=false)：路线不会破坏任何方块。",
         "本工具不会移动机器人：不会设置 activeGoal、不会触发自动重寻路、不会修改移动任务，也不会向移动队列加入动作。",
         "用于在行动前理解路线从哪一侧接近候选、最后几步落在哪里；若决定执行，再单独调用 pathfindToBounds。min 与 max_exclusive 必须直接复制候选 bounds 的 [x,y,z] 数组。"
     })
     public String previewPathToBounds(
             @P("最小坐标 [x,y,z]，直接复制候选 bounds.min") int[] min,
-            @P("最大坐标 [x,y,z]，直接复制候选 bounds.max_exclusive") int[] max_exclusive) {
+            @P("最大坐标 [x,y,z]，直接复制候选 bounds.max_exclusive") int[] max_exclusive,
+            @P(value = "是否允许寻路时挖掘挡路的方块；不填默认 false（不挖掘）", required = false)
+            Boolean allowDig) {
         logger.info(
-            "[AI Tool Call] 调用了 previewPathToBounds(min={}, max_exclusive={})",
-            java.util.Arrays.toString(min), java.util.Arrays.toString(max_exclusive)
+            "[AI Tool Call] 调用了 previewPathToBounds(min={}, max_exclusive={}, allowDig={})",
+            java.util.Arrays.toString(min), java.util.Arrays.toString(max_exclusive), allowDig
         );
         if (MovementSync.INSTANCE == null || MovementSync.INSTANCE.getWorld() == null) {
             return "MovementSync 世界尚未就绪，无法预览寻路节点。";
         }
+        boolean digAllowed = resolveAllowDig(allowDig);
         try {
-            Optional<RegionPathPlanner.Result> result = findRegionTarget(min, max_exclusive);
+            Optional<RegionPathPlanner.Result> result = findRegionTarget(min, max_exclusive, digAllowed);
             if (result.isEmpty()) {
-                return "路径预览失败：bounds 内没有找到可达站立点。不会移动机器人。";
+                return "路径预览失败：bounds 内没有找到可达站立点（当前挖掘许可：" + (digAllowed ? "允许挖掘" : "禁止挖掘") + "）。不会移动机器人。";
             }
             RegionPathPlanner.Result target = result.get();
             Vector3d position = MovementSync.INSTANCE.position.get();
@@ -224,34 +250,39 @@ public class MovementTools {
                 (int) Math.floor(position.y),
                 (int) Math.floor(position.z)
             );
-            DStarLite pathfinder = new DStarLite(start, target.target(), MovementSync.INSTANCE.getWorld());
+            DStarLite pathfinder = new DStarLite(start, target.target(), new DefaultPathfindingContext(
+                MovementSync.INSTANCE.getWorld(), digAllowed));
             List<?> path = pathfinder.findPath(2000);
             if (path == null || path.isEmpty() || !target.target().equals(pathEndpoint(path))) {
                 return "路径预览失败：世界状态在候选检查后发生变化，无法重建完整路线。不会移动机器人。";
             }
-            return formatPathPreview(target, path);
+            return formatPathPreview(target, path, digAllowed);
         } catch (IllegalArgumentException error) {
             return "无效 bounds：" + error.getMessage();
         }
     }
 
-    @Tool("智能寻路到指定半开区间内最近的可达站立点。min 与 max_exclusive 必须直接复制 CLMCP 搜索结果返回的 [x,y,z] 三整数数组，不要拆分或重排；原有 pathfindTo 保持可用。")
+    @Tool("智能寻路到指定半开区间内最近的可达站立点。min 与 max_exclusive 必须直接复制 CLMCP 搜索结果返回的 [x,y,z] 三整数数组，不要拆分或重排。默认不挖掘(allowDig=false)：不会破坏任何方块，遇到障碍只绕行、跳跃或搭桥；allowDig=true 才允许挖掘。原有 pathfindTo 保持可用。")
     public String pathfindToBounds(
             @P("最小坐标 [x,y,z]，直接复制 CLMCP 搜索结果 bounds.min") int[] min,
             @P("最大坐标 [x,y,z]，直接复制 CLMCP 搜索结果 bounds.max_exclusive") int[] max_exclusive,
+            @P(value = "是否允许寻路时挖掘挡路的方块；不填默认 false（不挖掘）。开门请用 interactBlock，不要靠挖掘穿墙", required = false)
+            Boolean allowDig,
             @P("绑定的任务ID；不绑定时传空字符串") String taskId) {
         logger.info(
-            "[AI Tool Call] 调用了 pathfindToBounds(min={}, max_exclusive={}, taskId={})",
-            java.util.Arrays.toString(min), java.util.Arrays.toString(max_exclusive), taskId
+            "[AI Tool Call] 调用了 pathfindToBounds(min={}, max_exclusive={}, allowDig={}, taskId={})",
+            java.util.Arrays.toString(min), java.util.Arrays.toString(max_exclusive), allowDig, taskId
         );
         if (MovementSync.INSTANCE == null || MovementSync.INSTANCE.getWorld() == null
             || MovementSync.INSTANCE.movementController == null) {
             return "MovementSync 插件尚未就绪，无法进行区域寻路。";
         }
+        boolean digAllowed = resolveAllowDig(allowDig);
+        applyAllowDigPermission(allowDig);
         try {
-            Optional<RegionPathPlanner.Result> result = findRegionTarget(min, max_exclusive);
+            Optional<RegionPathPlanner.Result> result = findRegionTarget(min, max_exclusive, digAllowed);
             if (result.isEmpty()) {
-                return "区域寻路失败：bounds 内没有找到可达站立点。可缩小 bounds 或先向候选区域移动。";
+                return "区域寻路失败：bounds 内没有找到可达站立点（当前挖掘许可：" + (digAllowed ? "允许挖掘" : "禁止挖掘") + "）。关门建筑请先用 interactBlock 开门，或缩小 bounds、先向候选区域移动。";
             }
             RegionPathPlanner.Result target = result.get();
             org.joml.Vector3i targetPos = target.target().toVector();
@@ -269,7 +300,7 @@ public class MovementTools {
         }
     }
 
-    private Optional<RegionPathPlanner.Result> findRegionTarget(int[] min, int[] maxExclusive) {
+    private Optional<RegionPathPlanner.Result> findRegionTarget(int[] min, int[] maxExclusive, boolean digAllowed) {
         Vector3d currentPosition = MovementSync.INSTANCE.position.get();
         if (currentPosition == null) return Optional.empty();
         Node start = new Node(
@@ -289,7 +320,8 @@ public class MovementTools {
                 }
             },
             (pathStart, goal) -> {
-                DStarLite pathfinder = new DStarLite(pathStart, goal, MovementSync.INSTANCE.getWorld());
+                DStarLite pathfinder = new DStarLite(pathStart, goal, new DefaultPathfindingContext(
+                    MovementSync.INSTANCE.getWorld(), digAllowed));
                 List<?> candidatePath = pathfinder.findPath(2000);
                 if (candidatePath == null || candidatePath.isEmpty()) return 0;
                 Node endpoint = pathEndpoint(candidatePath);
@@ -300,9 +332,10 @@ public class MovementTools {
         );
     }
 
-    static String formatPathPreview(RegionPathPlanner.Result target, List<?> path) {
+    static String formatPathPreview(RegionPathPlanner.Result target, List<?> path, boolean digAllowed) {
         StringBuilder output = new StringBuilder();
         output.append("路径预览完成；不会移动机器人，也未设置任何导航目标。\n")
+            .append("挖掘许可=").append(digAllowed ? "允许挖掘挡路方块" : "不挖掘任何方块").append('\n')
             .append("selected_target=(").append(target.target().x).append(',')
             .append(target.target().y).append(',').append(target.target().z).append(")")
             .append(" total_nodes=").append(path.size())
@@ -312,9 +345,10 @@ public class MovementTools {
         return output.toString();
     }
 
-    static String formatDirectPathPreview(Node target, List<?> path) {
+    static String formatDirectPathPreview(Node target, List<?> path, boolean digAllowed) {
         StringBuilder output = new StringBuilder();
         output.append("路径预览完成；不会移动机器人，也未设置任何导航目标。\n")
+            .append("挖掘许可=").append(digAllowed ? "允许挖掘挡路方块" : "不挖掘任何方块").append('\n')
             .append("selected_target=(").append(target.x).append(',')
             .append(target.y).append(',').append(target.z).append(")")
             .append(" total_nodes=").append(path.size()).append("\n");
