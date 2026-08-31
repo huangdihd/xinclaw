@@ -17,6 +17,8 @@ final class AgentManagerRegionToolPromptTest {
         String prompt = String.join("\n", annotation.value());
 
         assertTrue(prompt.contains("searchVoxelRegion"));
+        assertTrue(prompt.contains("getLoadedChunks"));
+        assertTrue(prompt.contains("最大半径64"));
         assertTrue(prompt.contains("findSpecificBlocksInBounds"));
         assertTrue(prompt.contains("getAreaMapAt"));
         assertTrue(prompt.contains("findReachablePointInBounds"));

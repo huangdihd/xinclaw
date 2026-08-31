@@ -27,13 +27,19 @@ import xin.bbtt.Block.BlockStateParser;
 import xin.bbtt.MovementSync;
 import xin.bbtt.mcbot.Bot;
 
+import java.util.Comparator;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.PriorityQueue;
+import java.util.Set;
 import java.util.function.Supplier;
 
 public class PerceptionTools {
     private static final Logger logger = LoggerFactory.getLogger(PerceptionTools.class);
+    private static final int MAX_SPECIFIC_BLOCK_RADIUS = 64;
+    private static final long MAX_SPECIFIC_BLOCK_CUBE_VOLUME = 2_200_000L;
 
     @FunctionalInterface
     interface BlockStateLookup {
@@ -42,6 +48,7 @@ public class PerceptionTools {
 
     private final BlockStateLookup blockStateLookup;
     private final Supplier<Vector3d> positionLookup;
+    private final Supplier<Set<xin.bbtt.world.World.ChunkPosition>> loadedChunksLookup;
 
     public PerceptionTools() {
         this(
@@ -54,13 +61,24 @@ public class PerceptionTools {
                     return null;
                 }
             },
-            () -> MovementSync.INSTANCE == null ? null : MovementSync.INSTANCE.position.get()
+            () -> MovementSync.INSTANCE == null ? null : MovementSync.INSTANCE.position.get(),
+            () -> MovementSync.INSTANCE == null || MovementSync.INSTANCE.getWorld() == null
+                ? Set.of()
+                : MovementSync.INSTANCE.getWorld().loadedChunks()
         );
     }
 
     PerceptionTools(BlockStateLookup blockStateLookup, Supplier<Vector3d> positionLookup) {
+        this(blockStateLookup, positionLookup, Set::of);
+    }
+
+    PerceptionTools(
+            BlockStateLookup blockStateLookup,
+            Supplier<Vector3d> positionLookup,
+            Supplier<Set<xin.bbtt.world.World.ChunkPosition>> loadedChunksLookup) {
         this.blockStateLookup = Objects.requireNonNull(blockStateLookup, "blockStateLookup");
         this.positionLookup = Objects.requireNonNull(positionLookup, "positionLookup");
+        this.loadedChunksLookup = Objects.requireNonNull(loadedChunksLookup, "loadedChunksLookup");
     }
 
     /** 解析指定坐标的方块状态，区块未加载或状态未知时返回 null。 */
@@ -96,6 +114,12 @@ public class PerceptionTools {
             first = false;
         }
         return sb.append(']').toString();
+    }
+
+    private static boolean isActualAirBlock(String lowerName) {
+        int namespace = lowerName.lastIndexOf(':');
+        String path = namespace >= 0 ? lowerName.substring(namespace + 1) : lowerName;
+        return path.equals("air") || path.equals("cave_air") || path.equals("void_air");
     }
 
     @Tool("环顾四周：一次性获取脚下/身体/头顶的方块、东南西北四个方向的通畅情况、头顶净空、以及附近的危险方块(岩浆/火/仙人掌等)。这是了解自身处境的首选感知工具。")
@@ -523,79 +547,143 @@ public class PerceptionTools {
         return result.toString();
     }
 
-    @Tool("获取机器人周围指定半径内特定方块（根据名称模糊匹配）的具体坐标位置，结果附带方块状态（如门 open=true/false、facing 朝向）。用于寻找特定的方块，如'door'(找所有门)、'工作台'、'钻石矿'等。搜到门/活板门后先看 open 状态：open=false 表示关着，可用 interactBlock 右键打开。")
+    @Tool("获取机器人周围半径1-64格内特定方块（根据名称模糊匹配）的具体坐标位置，结果附带方块状态（如门 open=true/false、facing 朝向）。支持大范围寻找建筑标志方块；若不清楚已加载范围，先调用 getLoadedChunks。搜到门/活板门后先看 open 状态：open=false 表示关着，可用 interactBlock 右键打开。")
     public String findSpecificBlocks(
-            @P("要查找的方块名称(英文或ID的一部分，如'door', 'diamond', 'crafting', 'log')") String blockNameQuery,
-            @P("搜索半径(方块距离，建议10-30)") double radius) {
+            @P("要查找的方块名称(英文或ID的一部分，如'door', 'bookshelf', 'diamond', 'log')") String blockNameQuery,
+            @P("搜索半径，范围1-64；全局建筑搜索可用60-64") double radius) {
         logger.info("[AI Tool Call] 调用了 findSpecificBlocks(query='{}', radius={})", blockNameQuery, radius);
-        
-        if (MovementSync.INSTANCE == null || MovementSync.INSTANCE.getWorld() == null) {
-            return "无法获取世界信息。";
+
+        if (blockNameQuery == null || blockNameQuery.isBlank()) {
+            return "方块名称查询不能为空。";
+        }
+        if (!Double.isFinite(radius) || radius < 1) {
+            return "搜索半径必须是1到64之间的有限数。";
+        }
+        if (radius > MAX_SPECIFIC_BLOCK_RADIUS) {
+            return "查询半径过大：最大64格。可先用 getLoadedChunks 查看当前已加载范围。";
         }
 
-        Vector3d center = MovementSync.INSTANCE.position.get();
+        Vector3d center = positionLookup.get();
         if (center == null) return "无法获取当前坐标。";
+        if (!Double.isFinite(center.x) || !Double.isFinite(center.y) || !Double.isFinite(center.z)
+                || Math.abs(center.x) > 30_000_000 || Math.abs(center.z) > 30_000_000
+                || center.y < xin.bbtt.world.World.getMinWorldY() - MAX_SPECIFIC_BLOCK_RADIUS
+                || center.y > xin.bbtt.world.World.getMaxWorldY() + MAX_SPECIFIC_BLOCK_RADIUS) {
+            return "当前坐标无效或超出Minecraft世界范围，无法执行方块搜索。";
+        }
 
         int r = (int) Math.ceil(radius);
-        int minX = (int) center.x - r;
-        int maxX = (int) center.x + r;
-        int minY = (int) center.y - r;
-        int maxY = (int) center.y + r;
-        int minZ = (int) center.z - r;
-        int maxZ = (int) center.z + r;
-
-        int totalBlocks = (maxX - minX + 1) * (maxY - minY + 1) * (maxZ - minZ + 1);
-        if (totalBlocks > 64000) { // 限制最大搜索体积 (约40x40x40)
-            return "查询半径过大，请缩小搜索半径（建议30以内）。";
-        }
-
-        String lowerQuery = blockNameQuery.toLowerCase();
-        record FoundBlock(int x, int y, int z, double dist, String name, String stateSuffix) {}
-        java.util.List<FoundBlock> found = new java.util.ArrayList<>();
-
         int cx = (int) Math.floor(center.x);
         int cy = (int) Math.floor(center.y);
         int cz = (int) Math.floor(center.z);
+        int minX = cx - r;
+        int maxX = cx + r;
+        int minY = Math.max(xin.bbtt.world.World.getMinWorldY(), cy - r);
+        int maxY = Math.min(xin.bbtt.world.World.getMaxWorldY(), cy + r);
+        int minZ = cz - r;
+        int maxZ = cz + r;
+
+        long sizeX = (long) maxX - minX + 1;
+        long sizeY = (long) maxY - minY + 1;
+        long sizeZ = (long) maxZ - minZ + 1;
+        long totalBlocks = sizeX * sizeY * sizeZ;
+        if (totalBlocks > MAX_SPECIFIC_BLOCK_CUBE_VOLUME) {
+            return "查询范围过大：最大扫描体积为2200000个方块。请缩小半径。";
+        }
+
+        String lowerQuery = blockNameQuery.toLowerCase(java.util.Locale.ROOT);
+        double radiusSquared = radius * radius;
+        record FoundBlock(int x, int y, int z, double dist, String name, BlockState state) {}
+        Comparator<FoundBlock> nearestFirst = Comparator
+            .comparingDouble(FoundBlock::dist)
+            .thenComparingInt(FoundBlock::x)
+            .thenComparingInt(FoundBlock::y)
+            .thenComparingInt(FoundBlock::z);
+        PriorityQueue<FoundBlock> nearest = new PriorityQueue<>(31, nearestFirst.reversed());
+        long matchCount = 0;
 
         for (int x = minX; x <= maxX; x++) {
+            double dx = x - center.x;
             for (int y = minY; y <= maxY; y++) {
+                double dy = y - center.y;
                 for (int z = minZ; z <= maxZ; z++) {
-                    // 球形半径检查
-                    double dist = center.distance(new Vector3d(x, y, z));
-                    if (dist > radius) continue;
+                    double dz = z - center.z;
+                    double distanceSquared = dx * dx + dy * dy + dz * dz;
+                    if (distanceSquared > radiusSquared) continue;
 
                     BlockState state = stateAt(x, y, z);
-                    if (state == null) continue;
+                    if (state == null || state.blockName() == null) continue;
                     String blockName = state.blockName();
+                    String lowerName = blockName.toLowerCase(java.util.Locale.ROOT);
+                    if (!lowerName.contains(lowerQuery) || isActualAirBlock(lowerName)) continue;
 
-                    if (blockName.toLowerCase().contains(lowerQuery) && !blockName.toLowerCase().contains("air")) {
-                        found.add(new FoundBlock(x, y, z, dist, blockName, formatState(state)));
+                    matchCount++;
+                    FoundBlock candidate = new FoundBlock(
+                        x, y, z, Math.sqrt(distanceSquared), blockName, state);
+                    if (nearest.size() < 30) {
+                        nearest.add(candidate);
+                    } else if (nearestFirst.compare(candidate, nearest.peek()) < 0) {
+                        nearest.poll();
+                        nearest.add(candidate);
                     }
                 }
             }
         }
 
-        if (found.isEmpty()) {
+        if (matchCount == 0) {
             return String.format("在半径 %.1f 内没有找到匹配 '%s' 的方块。", radius, blockNameQuery);
         }
 
-        // 按距离从近到远排序，只展示最近的30个
-        found.sort(java.util.Comparator.comparingDouble(FoundBlock::dist));
-        int shown = Math.min(found.size(), 30);
-
+        List<FoundBlock> found = new java.util.ArrayList<>(nearest);
+        found.sort(nearestFirst);
+        int shown = found.size();
         StringBuilder result = new StringBuilder();
-        result.append(String.format("在半径 %.1f 内共找到 %d 个匹配 '%s' 的方块，按距离从近到远列出前 %d 个:\n",
-                radius, found.size(), blockNameQuery, shown));
-
-        for (int i = 0; i < shown; i++) {
-            FoundBlock b = found.get(i);
+        result.append(String.format("在半径 %.1f 内共找到 %d 个匹配 '%s' 的方块，按距离从近到远列出前 %d 个:%n",
+                radius, matchCount, blockNameQuery, shown));
+        for (FoundBlock block : found) {
             result.append(String.format("- %s%s (%d,%d,%d) 距离%.1f格 [%s]%n",
-                    b.name(), b.stateSuffix(), b.x(), b.y(), b.z(), b.dist(), relativeDesc(b.x() - cx, b.y() - cy, b.z() - cz)));
+                block.name(), formatState(block.state()), block.x(), block.y(), block.z(), block.dist(),
+                relativeDesc(block.x() - cx, block.y() - cy, block.z() - cz)));
         }
-        if (found.size() > shown) {
-            result.append("...其余 ").append(found.size() - shown).append(" 个更远的已省略。");
+        if (matchCount > shown) {
+            result.append("...其余 ").append(matchCount - shown).append(" 个更远的已省略。");
+        }
+        return result.toString();
+    }
+
+    @Tool("获取当前客户端全部已加载水平区块，返回每个 chunk 的 (chunkX,chunkZ)、对应方块坐标范围、总方块坐标范围和世界Y范围。用于全局探索前确认哪些区域可被 findSpecificBlocks、地图或语义工具读取。")
+    public String getLoadedChunks() {
+        logger.info("[AI Tool Call] 调用了 getLoadedChunks()");
+        Set<xin.bbtt.world.World.ChunkPosition> snapshot = loadedChunksLookup.get();
+        if (snapshot == null || snapshot.isEmpty()) {
+            return "当前没有已加载区块，或世界信息尚未就绪。";
         }
 
+        List<xin.bbtt.world.World.ChunkPosition> chunks = snapshot.stream()
+            .sorted(Comparator.comparingInt(xin.bbtt.world.World.ChunkPosition::x)
+                .thenComparingInt(xin.bbtt.world.World.ChunkPosition::z))
+            .toList();
+        int minChunkX = chunks.stream().mapToInt(xin.bbtt.world.World.ChunkPosition::x).min().orElseThrow();
+        int maxChunkX = chunks.stream().mapToInt(xin.bbtt.world.World.ChunkPosition::x).max().orElseThrow();
+        int minChunkZ = chunks.stream().mapToInt(xin.bbtt.world.World.ChunkPosition::z).min().orElseThrow();
+        int maxChunkZ = chunks.stream().mapToInt(xin.bbtt.world.World.ChunkPosition::z).max().orElseThrow();
+
+        long minBlockX = (long) minChunkX * 16;
+        long maxBlockX = (long) maxChunkX * 16 + 15;
+        long minBlockZ = (long) minChunkZ * 16;
+        long maxBlockZ = (long) maxChunkZ * 16 + 15;
+        StringBuilder result = new StringBuilder();
+        result.append("当前客户端共").append(chunks.size()).append("个已加载水平区块。\n");
+        result.append(String.format("总方块XZ范围: x=[%d,%d], z=[%d,%d]；世界Y范围=[%d,%d]。%n",
+            minBlockX, maxBlockX, minBlockZ, maxBlockZ,
+            xin.bbtt.world.World.getMinWorldY(), xin.bbtt.world.World.getMaxWorldY()));
+        result.append("全部区块（按chunkX、chunkZ排序）:\n");
+        for (xin.bbtt.world.World.ChunkPosition chunk : chunks) {
+            long blockMinX = (long) chunk.x() * 16;
+            long blockMinZ = (long) chunk.z() * 16;
+            result.append(String.format("- chunk(%d,%d) blocks x=[%d,%d] z=[%d,%d]%n",
+                chunk.x(), chunk.z(), blockMinX, blockMinX + 15, blockMinZ, blockMinZ + 15));
+        }
         return result.toString();
     }
 

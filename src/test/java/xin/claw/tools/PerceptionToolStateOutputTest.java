@@ -45,6 +45,16 @@ final class PerceptionToolStateOutputTest {
     }
 
     @Test
+    void radiusAndLoadedChunkToolsExposeGlobalDiscoveryCapabilities() {
+        ToolSpecification radiusSearch = tool("findSpecificBlocks", PerceptionTools.class);
+        assertTrue(radiusSearch.description().contains("64"), radiusSearch.description());
+
+        ToolSpecification loadedChunks = tool("getLoadedChunks", PerceptionTools.class);
+        assertTrue(loadedChunks.description().contains("全部已加载"), loadedChunks.description());
+        assertTrue(loadedChunks.description().contains("方块坐标范围"), loadedChunks.description());
+    }
+
+    @Test
     void interactBlockDocumentsDoorAndButtonUsage() {
         ToolSpecification interact = tool("interactBlock", ActionTools.class);
         assertTrue(interact.description().contains("门"), interact.description());
