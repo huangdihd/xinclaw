@@ -28,6 +28,8 @@ import xin.bbtt.movements.ActionMovement;
 import xin.bbtt.pathfinding.DefaultPathfindingContext;
 import xin.bbtt.pathfinding.DStarLite;
 import xin.bbtt.pathfinding.Node;
+import xin.claw.tasks.Task;
+import xin.claw.tasks.TaskManager;
 import java.util.List;
 import java.util.Optional;
 
@@ -41,6 +43,51 @@ public class MovementTools {
      */
     static boolean resolveAllowDig(Boolean allowDig) {
         return Boolean.TRUE.equals(allowDig);
+    }
+
+    public record MovementTaskBinding(String taskId, boolean implicit) {}
+
+    public static MovementTaskBinding bindMovementTask(
+            TaskManager taskManager,
+            String requestedTaskId,
+            double x,
+            double y,
+            double z) {
+        if (requestedTaskId != null && !requestedTaskId.trim().isEmpty()) {
+            return new MovementTaskBinding(requestedTaskId.trim(), false);
+        }
+        String description = String.format(
+            "[SYSTEM_CONTINUATION] 到达寻路目标 (%d,%d,%d) 后继续执行原始用户目标",
+            (int) Math.floor(x), (int) Math.floor(y), (int) Math.floor(z)
+        );
+        Task task = taskManager.addTask(description);
+        taskManager.updateTaskStatus(task.getId(), Task.Status.IN_PROGRESS);
+        return new MovementTaskBinding(task.getId(), true);
+    }
+
+    public static boolean completeMovementTask(TaskManager taskManager, String taskId, boolean implicit) {
+        if (taskId == null || taskId.isBlank()) return false;
+        boolean updated = taskManager.updateTaskStatus(taskId, Task.Status.DONE);
+        if (updated && implicit) taskManager.removeTask(taskId);
+        return updated;
+    }
+
+    private static MovementTaskBinding installMovementTaskBinding(
+            String requestedTaskId, double x, double y, double z) {
+        xin.claw.XinClawPlugin plugin = xin.claw.XinClawPlugin.INSTANCE;
+        if (plugin == null || plugin.agentManager == null || plugin.agentManager.getTaskManager() == null) {
+            return new MovementTaskBinding("", false);
+        }
+        TaskManager manager = plugin.agentManager.getTaskManager();
+        if (plugin.currentMovementTaskIsImplicit && plugin.currentMovementTaskId != null) {
+            manager.removeTask(plugin.currentMovementTaskId);
+        }
+        MovementTaskBinding binding = bindMovementTask(manager, requestedTaskId, x, y, z);
+        plugin.currentMovementTaskId = binding.taskId();
+        plugin.currentMovementTaskIsImplicit = binding.implicit();
+        plugin.currentMovementGoal = new org.joml.Vector3i(
+            (int) Math.floor(x), (int) Math.floor(y), (int) Math.floor(z));
+        return binding;
     }
 
     static void applyAllowDigPermission(Boolean allowDig) {
@@ -111,7 +158,7 @@ public class MovementTools {
         return "已在任务队列中添加了 " + durationMs + " 毫秒的等待时间。";
     }
 
-    @Tool("智能动态寻路到指定的绝对坐标点 x, y, z。默认不挖掘(allowDig=false)：不会破坏任何方块，遇到障碍只绕行、跳跃或搭桥。allowDig=true 才允许挖掘挡路的方块；关着的门请用 interactBlock 打开，不要挖墙。如果传入了taskId，当到达目标时该任务会自动被标记为 DONE。大约每秒移动 3-4 格。")
+    @Tool("智能动态寻路到指定的绝对坐标点 x, y, z。默认不挖掘(allowDig=false)：不会破坏任何方块，遇到障碍只绕行、跳跃或搭桥。allowDig=true 才允许挖掘挡路的方块；关着的门请用 interactBlock 打开，不要挖墙。如果传入了taskId，到达时该任务会自动标记 DONE；留空时工具会自动创建内部 IN_PROGRESS 续航任务，保证到达或卡住后再次唤醒你继续原始目标。大约每秒移动 3-4 格。")
     public String pathfindTo(
             @P("目标 X 坐标") double x,
             @P("目标 Y 坐标") double y,
@@ -138,16 +185,12 @@ public class MovementTools {
         }
 
         // 使用 MovementSync 1.3.3+ 内置的寻路引擎
+        MovementTaskBinding binding = installMovementTaskBinding(taskId, x, y, z);
         org.joml.Vector3i targetPos = new org.joml.Vector3i((int) Math.floor(x), (int) Math.floor(y), (int) Math.floor(z));
         MovementSync.INSTANCE.setActiveGoal(targetPos);
         MovementSync.INSTANCE.triggerAutoRepath();
-        
-        // 绑定任务
-        if (taskId != null && !taskId.trim().isEmpty() && xin.claw.XinClawPlugin.INSTANCE != null) {
-            xin.claw.XinClawPlugin.INSTANCE.currentMovementTaskId = taskId.trim();
-        }
 
-        return String.format("已启动内置寻路引擎，寻路成功（包含 %d 个节点），开始前往坐标 (%.2f, %.2f, %.2f)。挖掘许可：%s。", path.size(), x, y, z, resolveAllowDig(allowDig) ? "允许挖掘挡路方块" : "不挖掘任何方块");
+        return String.format("已启动内置寻路引擎，寻路成功（包含 %d 个节点），开始前往坐标 (%.2f, %.2f, %.2f)。挖掘许可：%s。%s", path.size(), x, y, z, resolveAllowDig(allowDig) ? "允许挖掘挡路方块" : "不挖掘任何方块", binding.implicit() ? "已创建内部续航任务，到达或卡住后系统会再次唤醒你。" : "已绑定任务 ID: " + binding.taskId());
     }
 
     @Tool({
@@ -262,7 +305,7 @@ public class MovementTools {
         }
     }
 
-    @Tool("智能寻路到指定半开区间内最近的可达站立点。min 与 max_exclusive 必须直接复制 CLMCP 搜索结果返回的 [x,y,z] 三整数数组，不要拆分或重排。默认不挖掘(allowDig=false)：不会破坏任何方块，遇到障碍只绕行、跳跃或搭桥；allowDig=true 才允许挖掘。原有 pathfindTo 保持可用。")
+    @Tool("智能寻路到指定半开区间内最近的可达站立点。min 与 max_exclusive 必须直接复制 CLMCP 搜索结果返回的 [x,y,z] 三整数数组，不要拆分或重排。默认不挖掘；allowDig=true 才允许挖掘。taskId 留空时自动创建内部 IN_PROGRESS 续航任务，保证到达或卡住后再次唤醒。")
     public String pathfindToBounds(
             @P("最小坐标 [x,y,z]，直接复制 CLMCP 搜索结果 bounds.min") int[] min,
             @P("最大坐标 [x,y,z]，直接复制 CLMCP 搜索结果 bounds.max_exclusive") int[] max_exclusive,
@@ -285,15 +328,15 @@ public class MovementTools {
                 return "区域寻路失败：bounds 内没有找到可达站立点（当前挖掘许可：" + (digAllowed ? "允许挖掘" : "禁止挖掘") + "）。关门建筑请先用 interactBlock 开门，或缩小 bounds、先向候选区域移动。";
             }
             RegionPathPlanner.Result target = result.get();
+            MovementTaskBinding binding = installMovementTaskBinding(
+                taskId, target.target().x, target.target().y, target.target().z);
             org.joml.Vector3i targetPos = target.target().toVector();
             MovementSync.INSTANCE.setActiveGoal(targetPos);
             MovementSync.INSTANCE.triggerAutoRepath();
-            if (taskId != null && !taskId.trim().isEmpty() && xin.claw.XinClawPlugin.INSTANCE != null) {
-                xin.claw.XinClawPlugin.INSTANCE.currentMovementTaskId = taskId.trim();
-            }
             return String.format(
-                "已从 bounds 中选择可达站立点 (%d,%d,%d)，预检查路径%d个节点，并启动内置寻路引擎。",
-                target.target().x, target.target().y, target.target().z, target.pathLength()
+                "已从 bounds 中选择可达站立点 (%d,%d,%d)，预检查路径%d个节点，并启动内置寻路引擎。%s",
+                target.target().x, target.target().y, target.target().z, target.pathLength(),
+                binding.implicit() ? "已创建内部续航任务。" : "已绑定任务 ID: " + binding.taskId()
             );
         } catch (IllegalArgumentException error) {
             return "无效 bounds：" + error.getMessage();

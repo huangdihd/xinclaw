@@ -28,7 +28,7 @@ public class DeathListener implements Listener {
         }
         XinClawPlugin plugin = XinClawPlugin.INSTANCE;
         if (plugin == null || plugin.agentManager == null) return;
-        plugin.currentMovementTaskId = null;
+        plugin.invalidateTaskLoopWork();
 
         // 反复被杀(如重生点蹲守)时防刷屏
         long now = System.currentTimeMillis();

@@ -29,6 +29,7 @@ import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.function.LongSupplier;
+import java.util.function.BooleanSupplier;
 import java.util.regex.Pattern;
 import xin.claw.memory.PersistentChatMemoryStore;
 import xin.claw.tasks.TaskManager;
@@ -92,6 +93,7 @@ public class AgentManager {
     private final AgentTracePublisher tracePublisher;
     private PersistentChatMemoryStore memoryStore;
     public final java.util.concurrent.atomic.AtomicReference<Thread> processingThread = new java.util.concurrent.atomic.AtomicReference<>(null);
+    private final ProcessingAdmissionGate processingAdmissionGate = new ProcessingAdmissionGate();
     private final java.util.concurrent.atomic.AtomicBoolean memoryClearRequested = new java.util.concurrent.atomic.AtomicBoolean(false);
 
     public AgentManager() {
@@ -290,36 +292,50 @@ public class AgentManager {
     }
 
     public String processMessage(String message) {
+        return processMessageIf(message, () -> true);
+    }
+
+    public String processMessageIf(String message, BooleanSupplier admissionAllowed) {
         // Ensure the current thread's interrupt flag is cleared before starting, 
         // to prevent thread pool reuse issues causing InterruptedIOException.
         Thread.interrupted();
         
         Thread current = Thread.currentThread();
-        BotAgent agentForCall;
-        PersistentChatMemoryStore memoryStoreForCall;
-        // Share the same lifecycle lock as tool registration/rebuild. Once this
-        // slot is acquired, registerExternalTool sees isProcessing()==true.
-        synchronized (this) {
-            if (this.agent == null) return "Agent is not initialized.";
-            if (!processingThread.compareAndSet(null, current)) {
-                return "我现在正在思考上一条指令，请稍后再试！";
+        java.util.concurrent.atomic.AtomicReference<BotAgent> agentForCall = new java.util.concurrent.atomic.AtomicReference<>();
+        java.util.concurrent.atomic.AtomicReference<PersistentChatMemoryStore> memoryStoreForCall = new java.util.concurrent.atomic.AtomicReference<>();
+        // Lock order is always admission gate -> AgentManager lifecycle lock.
+        // Reset/timeout use the same gate, so guard validation and processing-slot
+        // acquisition cannot cross cleanup.
+        ProcessingAdmissionGate.Result admission = processingAdmissionGate.underGate(() -> {
+            synchronized (this) {
+                if (this.agent == null || !admissionAllowed.getAsBoolean()) {
+                    return ProcessingAdmissionGate.Result.REJECTED;
+                }
+                if (!processingThread.compareAndSet(null, current)) {
+                    return ProcessingAdmissionGate.Result.BUSY;
+                }
+                agentForCall.set(this.agent);
+                memoryStoreForCall.set(this.memoryStore);
+                return ProcessingAdmissionGate.Result.ACQUIRED;
             }
-            agentForCall = this.agent;
-            memoryStoreForCall = this.memoryStore;
+        });
+        if (admission == ProcessingAdmissionGate.Result.REJECTED) return "";
+        if (admission == ProcessingAdmissionGate.Result.BUSY) {
+            return "我现在正在思考上一条指令，请稍后再试！";
         }
 
         try {
             // 此刻确认没有对话在途，安全修复上一轮被打断时可能留下的残缺工具调用序列
-            if (memoryStoreForCall != null) {
-                memoryStoreForCall.repairConversation("default");
+            if (memoryStoreForCall.get() != null) {
+                memoryStoreForCall.get().repairConversation("default");
             }
             JsonObject inputTrace = new JsonObject();
             inputTrace.addProperty("text", message);
             tracePublisher.emit("agent_input", inputTrace);
             String response = executeWithActionGuard(
-                agentForCall,
+                agentForCall.get(),
                 message,
-                () -> memoryStoreForCall == null ? 0L : memoryStoreForCall.completedToolExecutionCount()
+                () -> memoryStoreForCall.get() == null ? 0L : memoryStoreForCall.get().completedToolExecutionCount()
             );
             JsonObject outputTrace = new JsonObject();
             outputTrace.addProperty("text", response);
@@ -347,6 +363,10 @@ public class AgentManager {
                 doClearMemoryNow();
             }
         }
+    }
+
+    public void blockNewProcessingAdmissions(Runnable cleanup) {
+        processingAdmissionGate.blockAdmissions(cleanup);
     }
 
     static String executeWithActionGuard(
