@@ -15,15 +15,18 @@ import dev.langchain4j.model.StreamingResponseHandler;
 import dev.langchain4j.model.output.Response;
 import java.io.IOException;
 import java.net.InetSocketAddress;
+import java.net.http.HttpTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.IntFunction;
+import java.util.function.IntPredicate;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -36,20 +39,28 @@ final class DeepSeekThinkingStreamingChatLanguageModelTest {
     private final AtomicInteger requestCount = new AtomicInteger();
     private final List<JsonObject> requests = new ArrayList<>();
     private final AtomicReference<IntFunction<String>> responseFactory = new AtomicReference<>();
+    private final AtomicReference<IntFunction<Integer>> statusFactory = new AtomicReference<>();
+    private final AtomicReference<IntPredicate> disconnectBeforeHeaders = new AtomicReference<>();
 
     @BeforeEach
     void startServer() throws Exception {
         responseFactory.set(index -> index == 1 ? firstToolCallStream() : finalAnswerStream());
+        statusFactory.set(index -> 200);
+        disconnectBeforeHeaders.set(index -> false);
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         baseUrl = "http://127.0.0.1:" + server.getAddress().getPort();
         server.createContext("/chat/completions", exchange -> {
             JsonObject request = JsonParser.parseString(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8)).getAsJsonObject();
             synchronized (requests) { requests.add(request); }
             int index = requestCount.incrementAndGet();
+            if (disconnectBeforeHeaders.get().test(index)) {
+                exchange.close();
+                return;
+            }
             String body = responseFactory.get().apply(index);
             byte[] encoded = body.getBytes(StandardCharsets.UTF_8);
             exchange.getResponseHeaders().add("Content-Type", "text/event-stream");
-            exchange.sendResponseHeaders(200, encoded.length);
+            exchange.sendResponseHeaders(statusFactory.get().apply(index), encoded.length);
             exchange.getResponseBody().write(encoded);
             exchange.close();
         });
@@ -142,6 +153,97 @@ final class DeepSeekThinkingStreamingChatLanguageModelTest {
         assertNull(handler.error.get(), String.valueOf(handler.error.get()));
         assertTrue(handler.response.get().content().hasToolExecutionRequests());
         assertEquals("", handler.tokens.toString());
+    }
+
+    @Test
+    void retriesTransientHttpStatusThenSucceeds() throws Exception {
+        statusFactory.set(index -> index == 1 ? 503 : 200);
+        responseFactory.set(index -> index == 1 ? "temporarily unavailable" : firstToolCallStream());
+        AgentTracePublisher publisher = new AgentTracePublisher(System::nanoTime);
+        List<AgentTraceEvent> trace = new ArrayList<>();
+        publisher.subscribe(trace::add);
+        DeepSeekThinkingStreamingChatLanguageModel model = new DeepSeekThinkingStreamingChatLanguageModel(
+            "secret", baseUrl, "glm-5.3-flash", Duration.ofSeconds(5), true, "high", publisher
+        );
+        CapturingHandler handler = new CapturingHandler();
+
+        model.generate(List.of(UserMessage.from("Where am I?")), List.of(
+            ToolSpecification.builder().name("whereAmI").description("position").build()), handler);
+
+        assertTrue(handler.done.await(8, TimeUnit.SECONDS));
+        assertNull(handler.error.get(), String.valueOf(handler.error.get()));
+        assertEquals(2, requestCount.get());
+        assertTrue(handler.response.get().content().hasToolExecutionRequests());
+        assertTrue(trace.stream().anyMatch(row -> row.eventType().equals("model_retry")
+            && row.payload().get("reason").getAsString().equals("http_503")));
+    }
+
+    @Test
+    void retriesConnectionClosedBeforeHeadersThenSucceeds() throws Exception {
+        disconnectBeforeHeaders.set(index -> index == 1);
+        responseFactory.set(index -> firstToolCallStream());
+        AgentTracePublisher publisher = new AgentTracePublisher(System::nanoTime);
+        List<AgentTraceEvent> trace = new ArrayList<>();
+        publisher.subscribe(trace::add);
+        DeepSeekThinkingStreamingChatLanguageModel model = new DeepSeekThinkingStreamingChatLanguageModel(
+            "secret", baseUrl, "glm-5.3-flash", Duration.ofSeconds(5), true, "high", publisher
+        );
+        CapturingHandler handler = new CapturingHandler();
+
+        model.generate(List.of(UserMessage.from("Where am I?")), List.of(
+            ToolSpecification.builder().name("whereAmI").description("position").build()), handler);
+
+        assertTrue(handler.done.await(8, TimeUnit.SECONDS));
+        assertNull(handler.error.get(), String.valueOf(handler.error.get()));
+        assertEquals(2, requestCount.get());
+        assertTrue(handler.response.get().content().hasToolExecutionRequests());
+        assertTrue(trace.stream().anyMatch(row -> row.eventType().equals("model_retry")
+            && row.payload().get("reason").getAsString().equals("transport_io")));
+    }
+
+    @Test
+    void doesNotRetryPermanentHttp400() throws Exception {
+        statusFactory.set(index -> 400);
+        responseFactory.set(index -> "invalid messages");
+        DeepSeekThinkingStreamingChatLanguageModel model = new DeepSeekThinkingStreamingChatLanguageModel(
+            "secret", baseUrl, "glm-5.3-flash", Duration.ofSeconds(5), true, "high",
+            new AgentTracePublisher(System::nanoTime)
+        );
+        CapturingHandler handler = new CapturingHandler();
+
+        model.generate(List.of(UserMessage.from("Where am I?")), handler);
+
+        assertTrue(handler.done.await(3, TimeUnit.SECONDS));
+        assertNotNull(handler.error.get());
+        assertEquals(1, requestCount.get());
+    }
+
+    @Test
+    void exhaustsAfterThreeTransientHttpFailures() throws Exception {
+        statusFactory.set(index -> 503);
+        responseFactory.set(index -> "temporarily unavailable");
+        AgentTracePublisher publisher = new AgentTracePublisher(System::nanoTime);
+        List<AgentTraceEvent> trace = new ArrayList<>();
+        publisher.subscribe(trace::add);
+        DeepSeekThinkingStreamingChatLanguageModel model = new DeepSeekThinkingStreamingChatLanguageModel(
+            "secret", baseUrl, "glm-5.3-flash", Duration.ofSeconds(5), true, "high", publisher
+        );
+        CapturingHandler handler = new CapturingHandler();
+
+        model.generate(List.of(UserMessage.from("Where am I?")), handler);
+
+        assertTrue(handler.done.await(6, TimeUnit.SECONDS));
+        assertNotNull(handler.error.get());
+        assertEquals(3, requestCount.get());
+        assertEquals(2, trace.stream().filter(row -> row.eventType().equals("model_retry")).count());
+    }
+
+    @Test
+    void classifiesHttpTimeoutAsRetryableTransport() {
+        assertTrue(DeepSeekThinkingStreamingChatLanguageModel.isRetryableTransport(
+            new CompletionException(new HttpTimeoutException("timed out"))));
+        assertFalse(DeepSeekThinkingStreamingChatLanguageModel.isRetryableTransport(
+            new IllegalArgumentException("bad request")));
     }
 
     private static String firstToolCallStream() {

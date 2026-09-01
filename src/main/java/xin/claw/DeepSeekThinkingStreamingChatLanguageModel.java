@@ -19,6 +19,7 @@ import dev.langchain4j.model.output.FinishReason;
 import dev.langchain4j.model.output.Response;
 import dev.langchain4j.model.output.TokenUsage;
 import java.io.BufferedReader;
+import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.net.URI;
@@ -34,6 +35,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import xin.claw.trace.AgentTracePublisher;
 
@@ -46,6 +50,8 @@ import xin.claw.trace.AgentTracePublisher;
  */
 final class DeepSeekThinkingStreamingChatLanguageModel implements StreamingChatLanguageModel {
     private static final Gson GSON = new Gson();
+    private static final int MAX_RETRIES = 2;
+    private static final long RETRY_BASE_DELAY_MILLIS = 500L;
     private final String apiKey;
     private final URI endpoint;
     private final String modelName;
@@ -128,6 +134,11 @@ final class DeepSeekThinkingStreamingChatLanguageModel implements StreamingChatL
             .thenAcceptAsync(response -> {
                 if (response.statusCode() < 200 || response.statusCode() >= 300) {
                     String body = readFully(response.body());
+                    if (retryableHttpStatus(response.statusCode()) && retryAttempt < MAX_RETRIES) {
+                        scheduleRetry(request, requestBody, handler, terminal, retryAttempt,
+                            "http_" + response.statusCode());
+                        return;
+                    }
                     fail(handler, terminal, new IllegalStateException(
                         "DeepSeek HTTP " + response.statusCode() + ": " + body
                     ));
@@ -136,30 +147,77 @@ final class DeepSeekThinkingStreamingChatLanguageModel implements StreamingChatL
                 try (InputStream stream = response.body()) {
                     parseStream(stream, handler, terminal);
                 } catch (Throwable error) {
-                    if (error instanceof EmptyModelResponseException empty && retryAttempt < 1) {
+                    if (error instanceof EmptyModelResponseException empty && retryAttempt < MAX_RETRIES) {
                         JsonObject retry = new JsonObject();
                         retry.addProperty("attempt", retryAttempt + 1);
                         retry.addProperty("response_id", empty.responseId);
                         retry.addProperty("reasoning_chars", empty.reasoningChars);
                         retry.addProperty("finish_reason", empty.finishReason);
                         trace.emit("model_empty_response_retry", retry);
-                        JsonObject retriedRequest = new JsonObject();
-                        retriedRequest.addProperty("model", modelName);
-                        retriedRequest.addProperty("thinking_enabled", thinkingEnabled);
-                        retriedRequest.addProperty("reasoning_effort", reasoningEffort);
-                        retriedRequest.addProperty("retry_attempt", retryAttempt + 1);
-                        retriedRequest.add("request", requestBody.deepCopy());
-                        trace.emit("model_request", retriedRequest);
-                        sendRequest(request, requestBody, handler, terminal, retryAttempt + 1);
+                        scheduleRetry(request, requestBody, handler, terminal, retryAttempt,
+                            "empty_" + (empty.finishReason == null ? "unknown" : empty.finishReason));
+                        return;
+                    }
+                    if (isRetryableTransport(error) && retryAttempt < MAX_RETRIES) {
+                        scheduleRetry(request, requestBody, handler, terminal, retryAttempt, "transport_io");
                         return;
                     }
                     fail(handler, terminal, error);
                 }
             })
             .exceptionally(error -> {
-                fail(handler, terminal, error);
+                if (isRetryableTransport(error) && retryAttempt < MAX_RETRIES) {
+                    scheduleRetry(request, requestBody, handler, terminal, retryAttempt, "transport_io");
+                } else {
+                    fail(handler, terminal, error);
+                }
                 return null;
             });
+    }
+
+    private void scheduleRetry(
+        HttpRequest request,
+        JsonObject requestBody,
+        StreamingResponseHandler<AiMessage> handler,
+        AtomicBoolean terminal,
+        int retryAttempt,
+        String reason
+    ) {
+        if (terminal.get()) return;
+        int nextAttempt = retryAttempt + 1;
+        long delayMillis = RETRY_BASE_DELAY_MILLIS << retryAttempt;
+        JsonObject retry = new JsonObject();
+        retry.addProperty("attempt", nextAttempt + 1);
+        retry.addProperty("retry_attempt", nextAttempt);
+        retry.addProperty("reason", reason);
+        retry.addProperty("delay_millis", delayMillis);
+        trace.emit("model_retry", retry);
+        JsonObject retriedRequest = new JsonObject();
+        retriedRequest.addProperty("model", modelName);
+        retriedRequest.addProperty("thinking_enabled", thinkingEnabled);
+        retriedRequest.addProperty("reasoning_effort", reasoningEffort);
+        retriedRequest.addProperty("retry_attempt", nextAttempt);
+        retriedRequest.addProperty("retry_reason", reason);
+        retriedRequest.add("request", requestBody.deepCopy());
+        trace.emit("model_request", retriedRequest);
+        CompletableFuture.runAsync(
+            () -> sendRequest(request, requestBody, handler, terminal, nextAttempt),
+            CompletableFuture.delayedExecutor(delayMillis, TimeUnit.MILLISECONDS)
+        );
+    }
+
+    static boolean retryableHttpStatus(int status) {
+        return status == 408 || status == 425 || status == 429 || status >= 500;
+    }
+
+    static boolean isRetryableTransport(Throwable error) {
+        Throwable current = error;
+        while (current != null) {
+            if (current instanceof IOException) return true;
+            if (current instanceof CompletionException && current.getCause() == current) break;
+            current = current.getCause();
+        }
+        return false;
     }
 
     private JsonObject requestBody(List<ChatMessage> messages, List<ToolSpecification> tools) {
