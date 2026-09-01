@@ -60,6 +60,8 @@ final class DeepSeekThinkingStreamingChatLanguageModel implements StreamingChatL
     private final AgentTracePublisher trace;
     private final HttpClient client;
     private final Map<String, String> reasoningByMessage = new ConcurrentHashMap<>();
+    private final java.util.concurrent.atomic.AtomicReference<UserMessage> latestUserMessage =
+        new java.util.concurrent.atomic.AtomicReference<>();
 
     DeepSeekThinkingStreamingChatLanguageModel(
         String apiKey,
@@ -237,8 +239,23 @@ final class DeepSeekThinkingStreamingChatLanguageModel implements StreamingChatL
             thinking.addProperty("type", "disabled");
             payload.add("thinking", thinking);
         }
+        UserMessage newestUser = null;
+        for (ChatMessage message : messages) {
+            if (message instanceof UserMessage user) newestUser = user;
+        }
+        if (newestUser != null) latestUserMessage.set(newestUser);
+
         JsonArray serializedMessages = new JsonArray();
-        for (ChatMessage message : messages) serializedMessages.add(serializeMessage(message));
+        UserMessage anchoredUser = newestUser == null ? latestUserMessage.get() : null;
+        boolean anchorInserted = false;
+        for (ChatMessage message : messages) {
+            if (anchoredUser != null && !anchorInserted && !(message instanceof SystemMessage)) {
+                serializedMessages.add(serializeMessage(anchoredUser));
+                anchorInserted = true;
+            }
+            serializedMessages.add(serializeMessage(message));
+        }
+        if (anchoredUser != null && !anchorInserted) serializedMessages.add(serializeMessage(anchoredUser));
         payload.add("messages", serializedMessages);
         if (!tools.isEmpty()) {
             JsonArray serializedTools = new JsonArray();

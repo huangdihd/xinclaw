@@ -219,6 +219,39 @@ final class DeepSeekThinkingStreamingChatLanguageModelTest {
     }
 
     @Test
+    void retainsLatestUserMessageWhenWindowContainsOnlyToolHistory() throws Exception {
+        statusFactory.set(index -> requests.get(index - 1).getAsJsonArray("messages").asList().stream()
+            .anyMatch(message -> message.getAsJsonObject().get("role").getAsString().equals("user")) ? 200 : 400);
+        responseFactory.set(index -> finalAnswerStream());
+        DeepSeekThinkingStreamingChatLanguageModel model = new DeepSeekThinkingStreamingChatLanguageModel(
+            "secret", baseUrl, "glm-5.3-flash", Duration.ofSeconds(5), true, "high",
+            new AgentTracePublisher(System::nanoTime)
+        );
+
+        CapturingHandler first = new CapturingHandler();
+        model.generate(List.of(UserMessage.from("Enter the target building.")), first);
+        assertTrue(first.done.await(3, TimeUnit.SECONDS));
+        assertNull(first.error.get(), String.valueOf(first.error.get()));
+
+        ToolExecutionRequest toolCall = ToolExecutionRequest.builder()
+            .id("call-evicted-user")
+            .name("whereAmI")
+            .arguments("{}")
+            .build();
+        CapturingHandler continued = new CapturingHandler();
+        model.generate(List.of(
+            AiMessage.from(List.of(toolCall)),
+            ToolExecutionResultMessage.from("call-evicted-user", "whereAmI", "x=1 y=64 z=2")
+        ), continued);
+
+        assertTrue(continued.done.await(3, TimeUnit.SECONDS));
+        assertNull(continued.error.get(), String.valueOf(continued.error.get()));
+        JsonObject anchored = requests.get(1).getAsJsonArray("messages").get(0).getAsJsonObject();
+        assertEquals("user", anchored.get("role").getAsString());
+        assertEquals("Enter the target building.", anchored.get("content").getAsString());
+    }
+
+    @Test
     void exhaustsAfterThreeTransientHttpFailures() throws Exception {
         statusFactory.set(index -> 503);
         responseFactory.set(index -> "temporarily unavailable");
