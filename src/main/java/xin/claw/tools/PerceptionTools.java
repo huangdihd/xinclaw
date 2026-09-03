@@ -290,10 +290,10 @@ public class PerceptionTools {
         return sb.toString();
     }
 
-    @Tool("直接使用 searchLoadedVoxelRegions 或 searchVoxelRegion 返回的半开 bounds 生成候选区域俯视分层地图，不会移动机器人。min 与 max_exclusive 必须原样复制 Rank-1 bounds；mapMinY/mapMaxYExclusive 选择 bounds 内最多5个绝对Y层。用于 CLMCP 候选内部的几何细化、入口和内部定位；不得脱离候选范围扫描任意远程坐标。水平边长最多32格。")
+    @Tool("为指定半开 bounds 生成俯视分层地图，不会移动机器人。min 与 max_exclusive 定义要显示的区域；mapMinY/mapMaxYExclusive 选择 bounds 内最多5个绝对Y层。适合查看区域内的方块布局、结构和通路；水平边长最多32格。")
     public String getAreaMapAt(
-            @P("最小坐标三整数数组 [x,y,z]，包含；直接复制 CLMCP 搜索结果 bounds.min") int[] min,
-            @P("最大坐标三整数数组 [x,y,z]，不包含；直接复制 CLMCP 搜索结果 bounds.max_exclusive") int[] max_exclusive,
+            @P("最小坐标三整数数组 [x,y,z]，包含") int[] min,
+            @P("最大坐标三整数数组 [x,y,z]，不包含") int[] max_exclusive,
             @P("要显示的最小绝对Y，包含；必须位于bounds内，通常使用当前已知地面Y-1") int mapMinY,
             @P("要显示的最大绝对Y，不包含；最多比mapMinY大5，通常使用当前已知地面Y+4") int mapMaxYExclusive) {
         RegionPathPlanner.Bounds bounds;
@@ -332,7 +332,7 @@ public class PerceptionTools {
         );
     }
 
-    @Tool("生成以任意绝对坐标为中心的俯视分层字符地图，不会移动机器人。用于普通地图分析；CLMCP 导航任务的候选细化应优先使用接收 Rank-1 bounds 的 getAreaMapAt，避免手算中心和半径。方向: 上=北(-Z)，下=南(+Z)，左=西(-X)，右=东(+X)。")
+    @Tool("生成以任意绝对坐标为中心的俯视分层字符地图，不会移动机器人。适合查看局部方块布局；方向: 上=北(-Z)，下=南(+Z)，左=西(-X)，右=东(+X)。")
     public String getAreaMapAtPoint(
             @P("地图中心 X 绝对坐标") int centerX,
             @P("地图中心 Y 绝对坐标") int centerY,
