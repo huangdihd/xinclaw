@@ -31,11 +31,11 @@
             <scope>provided</scope>
         </dependency>
 
-        <!-- MovementSync Dependency -->
+        <!-- Pinned companion MovementSync PR build; resolvable from JitPack in a clean checkout. -->
         <dependency>
             <groupId>com.github.huangdihd</groupId>
             <artifactId>MovementSync</artifactId>
-            <version>1.5.0-RELEASE</version>
+            <version>03e85b6b33485cdaabfc77c3b6e8911979a2990d</version>
             <scope>provided</scope>
         </dependency>
 
@@ -59,6 +59,13 @@
             <artifactId>slf4j-simple</artifactId>
             <version>1.7.36</version>
         </dependency>
+
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <version>5.11.4</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>
@@ -80,6 +87,19 @@
             </resource>
         </resources>
         <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.13.0</version>
+                <configuration>
+                    <parameters>true</parameters>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.5.2</version>
+            </plugin>
             <!-- Shade plugin to bundle langchain4j dependencies into our plugin jar -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>

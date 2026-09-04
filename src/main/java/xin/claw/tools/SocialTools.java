@@ -131,10 +131,13 @@ public class SocialTools {
         xin.bbtt.Entity.Entity entity = MovementSync.INSTANCE.getWorld().getEntity(entityId);
         if (entity == null) return "未找到 ID 为 " + entityId + " 的玩家，请确保他在视野范围内（可以通过 getNearbyPlayers 获取 ID）。";
         
-        MovementSync.INSTANCE.setFollowTargetId(entityId);
-        MovementSync.INSTANCE.triggerAutoRepath();
+        triggerFollowRepath(MovementSync.INSTANCE, entityId);
         
         return "正在开始跟随实体 ID 为 " + entityId + " 的玩家。机器人会自动避障。";
+    }
+
+    static void triggerFollowRepath(MovementSync movementSync, int entityId) {
+        movementSync.startFollowingNavigation(entityId, -1, false);
     }
 
     @Tool("停止跟随玩家。")
@@ -142,8 +145,7 @@ public class SocialTools {
         logger.info("[AI Tool Call] 调用了 stopFollowing()");
         if (MovementSync.INSTANCE == null) return "MovementSync 插件尚未就绪。";
         
-        MovementSync.INSTANCE.setFollowTargetId(-1);
-        MovementSync.INSTANCE.getMovementController().cancelAll();
+        MovementSync.INSTANCE.cancelNavigation();
         
         return "已停止跟随玩家。";
     }

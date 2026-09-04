@@ -21,14 +21,11 @@ public class DeathListener implements Listener {
 
         // 死亡后旧寻路目标已无意义，清掉防止重生后朝旧目标乱跑
         if (MovementSync.INSTANCE != null) {
-            MovementSync.INSTANCE.setActiveGoal(null);
-            if (MovementSync.INSTANCE.movementController != null) {
-                MovementSync.INSTANCE.movementController.cancelAll();
-            }
+            MovementSync.INSTANCE.cancelNavigation();
         }
         XinClawPlugin plugin = XinClawPlugin.INSTANCE;
         if (plugin == null || plugin.agentManager == null) return;
-        plugin.currentMovementTaskId = null;
+        plugin.invalidateTaskLoopWork();
 
         // 反复被杀(如重生点蹲守)时防刷屏
         long now = System.currentTimeMillis();

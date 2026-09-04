@@ -20,13 +20,19 @@ public class TaskManager {
     private final File storageFile;
 
     public TaskManager() {
-        this.storageFile = new File(xin.claw.PluginConfig.getDataDir(), "tasks.json");
+        this(new File(xin.claw.PluginConfig.getDataDir(), "tasks.json"));
+    }
+
+    public TaskManager(File storageFile) {
+        this.storageFile = java.util.Objects.requireNonNull(storageFile, "storageFile");
         load();
     }
 
-    public void addTask(String desc) {
-        tasks.add(new Task(desc));
+    public Task addTask(String desc) {
+        Task task = new Task(desc);
+        tasks.add(task);
         save();
+        return task;
     }
 
     public List<Task> getTasks() {

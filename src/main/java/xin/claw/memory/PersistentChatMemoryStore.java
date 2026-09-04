@@ -34,14 +34,29 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import xin.claw.trace.AgentTracePublisher;
 
 public class PersistentChatMemoryStore implements ChatMemoryStore {
     private static final Logger logger = LoggerFactory.getLogger(PersistentChatMemoryStore.class);
+    static final int MAX_TRACKED_TOOL_IDS = 512;
     private final Path filePath;
+    private final java.util.Set<String> completedToolExecutionIds =
+        boundedKeySet();
+    private final java.util.concurrent.atomic.AtomicLong completedToolExecutionCount =
+        new java.util.concurrent.atomic.AtomicLong();
+    private final java.util.Set<String> recordedToolCallIds =
+        boundedKeySet();
+    private final AgentTracePublisher trace;
 
     public PersistentChatMemoryStore(String pluginDir) {
+        this(pluginDir, new AgentTracePublisher());
+    }
+
+    public PersistentChatMemoryStore(String pluginDir, AgentTracePublisher trace) {
         this.filePath = new File(pluginDir + File.separator + "chat-memory.json").toPath();
+        this.trace = java.util.Objects.requireNonNull(trace, "trace");
         ensureFileExists();
+        seedRecordedToolExecutions(getMessages("default"));
     }
 
     private void ensureFileExists() {
@@ -135,10 +150,29 @@ public class PersistentChatMemoryStore implements ChatMemoryStore {
         }
     }
 
+    static List<ChatMessage> collapseConsecutiveDuplicateFinalAiMessages(List<ChatMessage> messages) {
+        List<ChatMessage> result = new ArrayList<>(messages.size());
+        AiMessage previousFinal = null;
+        for (ChatMessage message : messages) {
+            if (message instanceof AiMessage ai && !ai.hasToolExecutionRequests()) {
+                if (previousFinal != null && java.util.Objects.equals(previousFinal.text(), ai.text())) {
+                    continue;
+                }
+                previousFinal = ai;
+            } else {
+                previousFinal = null;
+            }
+            result.add(message);
+        }
+        return result;
+    }
+
     @Override
     public void updateMessages(Object memoryId, List<ChatMessage> messages) {
         try {
-            String json = ChatMessageSerializer.messagesToJson(messages);
+            List<ChatMessage> normalized = collapseConsecutiveDuplicateFinalAiMessages(messages);
+            recordNewToolEvents(normalized);
+            String json = ChatMessageSerializer.messagesToJson(normalized);
             Files.write(filePath, json.getBytes(StandardCharsets.UTF_8));
         } catch (IOException e) {
             logger.error("Failed to update messages in store", e);
@@ -149,8 +183,82 @@ public class PersistentChatMemoryStore implements ChatMemoryStore {
     public void deleteMessages(Object memoryId) {
         try {
             Files.write(filePath, "[]".getBytes(StandardCharsets.UTF_8));
+            completedToolExecutionIds.clear();
+            completedToolExecutionCount.set(0L);
+            recordedToolCallIds.clear();
         } catch (IOException e) {
             logger.error("Failed to clear messages in store", e);
         }
+    }
+
+    public long completedToolExecutionCount() {
+        return completedToolExecutionCount.get();
+    }
+
+    int trackedCompletedToolIdCount() {
+        return completedToolExecutionIds.size();
+    }
+
+    int trackedToolCallIdCount() {
+        return recordedToolCallIds.size();
+    }
+
+    private void seedRecordedToolExecutions(List<ChatMessage> messages) {
+        for (ChatMessage message : messages) {
+            if (message instanceof AiMessage ai && ai.hasToolExecutionRequests()) {
+                for (ToolExecutionRequest request : ai.toolExecutionRequests()) {
+                    recordedToolCallIds.add(toolCallKey(request));
+                }
+            }
+            if (message instanceof ToolExecutionResultMessage result) {
+                String id = result.id();
+                if (id != null && !id.isBlank() && completedToolExecutionIds.add(id)) {
+                    completedToolExecutionCount.incrementAndGet();
+                }
+            }
+        }
+    }
+
+    private void recordNewToolEvents(List<ChatMessage> messages) {
+        for (ChatMessage message : messages) {
+            if (message instanceof AiMessage ai && ai.hasToolExecutionRequests()) {
+                for (ToolExecutionRequest request : ai.toolExecutionRequests()) {
+                    if (!recordedToolCallIds.add(toolCallKey(request))) continue;
+                    com.google.gson.JsonObject payload = new com.google.gson.JsonObject();
+                    payload.addProperty("id", request.id());
+                    payload.addProperty("tool", request.name());
+                    payload.addProperty("arguments", request.arguments());
+                    trace.emit("tool_call", payload);
+                }
+            }
+            if (message instanceof ToolExecutionResultMessage result) {
+                String key = result.id() != null && !result.id().isBlank()
+                    ? result.id() : result.toolName() + "\u0000" + result.text();
+                if (!completedToolExecutionIds.add(key)) continue;
+                completedToolExecutionCount.incrementAndGet();
+                com.google.gson.JsonObject payload = new com.google.gson.JsonObject();
+                payload.addProperty("id", result.id());
+                payload.addProperty("tool", result.toolName());
+                payload.addProperty("result", result.text());
+                trace.emit("tool_result", payload);
+            }
+        }
+    }
+
+    private static String toolCallKey(ToolExecutionRequest request) {
+        if (request.id() != null && !request.id().isBlank()) return request.id();
+        return request.name() + "\u0000" + request.arguments();
+    }
+
+    private static java.util.Set<String> boundedKeySet() {
+        java.util.Map<String, Boolean> map = java.util.Collections.synchronizedMap(
+            new java.util.LinkedHashMap<>(MAX_TRACKED_TOOL_IDS + 1, 0.75f, true) {
+                @Override
+                protected boolean removeEldestEntry(java.util.Map.Entry<String, Boolean> eldest) {
+                    return size() > MAX_TRACKED_TOOL_IDS;
+                }
+            }
+        );
+        return java.util.Collections.newSetFromMap(map);
     }
 }

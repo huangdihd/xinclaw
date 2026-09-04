@@ -58,6 +58,20 @@ low_health_threshold=10.0
 private_message_blacklist=back,help
 ```
 
+### DeepSeek SSE 与运行轨迹
+
+当模型名包含 `deepseek` 时，XinClaw 使用原生 OpenAI-compatible SSE 适配器。若
+`enable_thinking=true`，它会分别处理 `reasoning_content`、可见 `content` 和分片
+`tool_calls`，并在工具续调用中按协议回传 reasoning。若网关偶发返回只有 reasoning、
+没有 content/tool call 的终态，同一请求最多重试两次，不会把思维内容伪装成回复。
+
+`AgentManager.subscribeTrace(...)` 可订阅有序的 monotonic runtime trace，包括模型请求、
+reasoning/content 流片段、模型响应、工具参数、完整工具返回、Agent 输入/输出及错误。
+Benchmark 等外部插件应直接订阅该接口，不应再解析控制台日志。
+
+外部插件可以通过 `AgentToolRegistry` 注册额外工具；XinClaw 会把工具 schema 和结果
+交给模型，但核心运行时不依赖任何特定外部检索或感知模型。
+
 ## 🎮 指令使用
 
 - **控制台指令**：

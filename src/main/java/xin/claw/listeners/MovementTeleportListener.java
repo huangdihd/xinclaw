@@ -34,7 +34,8 @@ public class MovementTeleportListener implements Listener {
             
             // 传送事件触发 AI (加入 15 秒冷却时间防止 2b2t 频繁拉回导致刷屏)
             long now = System.currentTimeMillis();
-            if (now - lastTeleportNotifyTime > 15000) {
+            if (!XinClawPlugin.INSTANCE.isTeleportAgentNotificationsSuppressed()
+                    && now - lastTeleportNotifyTime > 15000) {
                 lastTeleportNotifyTime = now;
                 
                 if (XinClawPlugin.INSTANCE.executorService != null && !XinClawPlugin.INSTANCE.executorService.isShutdown()) {
