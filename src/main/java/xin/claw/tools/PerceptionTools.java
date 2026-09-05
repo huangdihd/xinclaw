@@ -49,6 +49,7 @@ public class PerceptionTools {
     private final BlockStateLookup blockStateLookup;
     private final Supplier<Vector3d> positionLookup;
     private final Supplier<Set<xin.bbtt.world.World.ChunkPosition>> loadedChunksLookup;
+    private final java.util.function.IntFunction<xin.bbtt.Entity.Entity> entityLookup;
 
     public PerceptionTools() {
         this(
@@ -64,21 +65,32 @@ public class PerceptionTools {
             () -> MovementSync.INSTANCE == null ? null : MovementSync.INSTANCE.position.get(),
             () -> MovementSync.INSTANCE == null || MovementSync.INSTANCE.getWorld() == null
                 ? Set.of()
-                : MovementSync.INSTANCE.getWorld().loadedChunks()
+                : MovementSync.INSTANCE.getWorld().loadedChunks(),
+            entityId -> MovementSync.INSTANCE == null || MovementSync.INSTANCE.getWorld() == null
+                ? null : MovementSync.INSTANCE.getWorld().getEntity(entityId)
         );
     }
 
     PerceptionTools(BlockStateLookup blockStateLookup, Supplier<Vector3d> positionLookup) {
-        this(blockStateLookup, positionLookup, Set::of);
+        this(blockStateLookup, positionLookup, Set::of, entityId -> null);
     }
 
     PerceptionTools(
             BlockStateLookup blockStateLookup,
             Supplier<Vector3d> positionLookup,
             Supplier<Set<xin.bbtt.world.World.ChunkPosition>> loadedChunksLookup) {
+        this(blockStateLookup, positionLookup, loadedChunksLookup, entityId -> null);
+    }
+
+    PerceptionTools(
+            BlockStateLookup blockStateLookup,
+            Supplier<Vector3d> positionLookup,
+            Supplier<Set<xin.bbtt.world.World.ChunkPosition>> loadedChunksLookup,
+            java.util.function.IntFunction<xin.bbtt.Entity.Entity> entityLookup) {
         this.blockStateLookup = Objects.requireNonNull(blockStateLookup, "blockStateLookup");
         this.positionLookup = Objects.requireNonNull(positionLookup, "positionLookup");
         this.loadedChunksLookup = Objects.requireNonNull(loadedChunksLookup, "loadedChunksLookup");
+        this.entityLookup = Objects.requireNonNull(entityLookup, "entityLookup");
     }
 
     /** 解析指定坐标的方块状态，区块未加载或状态未知时返回 null。 */
@@ -121,6 +133,104 @@ public class PerceptionTools {
         String path = namespace >= 0 ? lowerName.substring(namespace + 1) : lowerName;
         return path.equals("air") || path.equals("cave_air") || path.equals("void_air");
     }
+
+    @Tool("沿指定实体当前头部朝向做方块射线检测，返回视线首个命中的非空气方块、命中面和前一空气格。只读取已知世界状态，不会转动或移动任何实体。")
+    public String getEntityLookTarget(
+            @P("实体 ID，可通过 getNearbyEntities 获取") int entityId,
+            @P("最大检测距离，1到64格") double maxDistance) {
+        logger.info("[AI Tool Call] getEntityLookTarget(id={}, maxDistance={})", entityId, maxDistance);
+        if (!Double.isFinite(maxDistance) || maxDistance < 1.0 || maxDistance > 64.0) {
+            return "maxDistance 必须是1到64之间的有限数值。";
+        }
+        xin.bbtt.Entity.Entity entity = entityLookup.apply(entityId);
+        if (entity == null || entity.getPosition() == null) return "未找到实体 ID " + entityId + "。";
+
+        Vector3d origin = new Vector3d(entity.getPosition())
+            .add(0, Math.max(0.1, entity.getHeight() * 0.9), 0);
+        Vector3d direction = lookDirection(entity.getHeadYaw(), entity.getPitch());
+        RaycastResult result = raycastBlocks(origin, direction, maxDistance);
+        if (result.unknown()) {
+            return String.format(
+                "entity_id=%d ray_stopped=unknown position=(%d,%d,%d) distance=%.2f",
+                entityId, result.x(), result.y(), result.z(), result.distance());
+        }
+        if (result.state() == null) {
+            return String.format("entity_id=%d hit=none max_distance=%.2f", entityId, maxDistance);
+        }
+        return String.format(
+            "entity_id=%d hit=(%d,%d,%d) block=%s%s face=%s previous=(%d,%d,%d) distance=%.2f",
+            entityId,
+            result.x(), result.y(), result.z(), result.state().blockName(), formatState(result.state()),
+            result.face(), result.previousX(), result.previousY(), result.previousZ(), result.distance());
+    }
+
+    static Vector3d lookDirection(float headYaw, float pitch) {
+        double yawRadians = Math.toRadians(headYaw);
+        double pitchRadians = Math.toRadians(pitch);
+        double horizontal = Math.cos(pitchRadians);
+        return new Vector3d(
+            -Math.sin(yawRadians) * horizontal,
+            -Math.sin(pitchRadians),
+            Math.cos(yawRadians) * horizontal
+        ).normalize();
+    }
+
+    private RaycastResult raycastBlocks(Vector3d origin, Vector3d direction, double maxDistance) {
+        int x = (int) Math.floor(origin.x);
+        int y = (int) Math.floor(origin.y);
+        int z = (int) Math.floor(origin.z);
+        int previousX = x;
+        int previousY = y;
+        int previousZ = z;
+        int stepX = direction.x > 0 ? 1 : direction.x < 0 ? -1 : 0;
+        int stepY = direction.y > 0 ? 1 : direction.y < 0 ? -1 : 0;
+        int stepZ = direction.z > 0 ? 1 : direction.z < 0 ? -1 : 0;
+        double deltaX = stepX == 0 ? Double.POSITIVE_INFINITY : Math.abs(1.0 / direction.x);
+        double deltaY = stepY == 0 ? Double.POSITIVE_INFINITY : Math.abs(1.0 / direction.y);
+        double deltaZ = stepZ == 0 ? Double.POSITIVE_INFINITY : Math.abs(1.0 / direction.z);
+        double nextX = stepX > 0 ? x + 1.0 : x;
+        double nextY = stepY > 0 ? y + 1.0 : y;
+        double nextZ = stepZ > 0 ? z + 1.0 : z;
+        double tMaxX = stepX == 0 ? Double.POSITIVE_INFINITY : (nextX - origin.x) / direction.x;
+        double tMaxY = stepY == 0 ? Double.POSITIVE_INFINITY : (nextY - origin.y) / direction.y;
+        double tMaxZ = stepZ == 0 ? Double.POSITIVE_INFINITY : (nextZ - origin.z) / direction.z;
+        double distance = 0.0;
+        String face = "INSIDE";
+
+        while (distance <= maxDistance) {
+            BlockState state = stateAt(x, y, z);
+            if (state == null) return new RaycastResult(x, y, z, previousX, previousY, previousZ, distance, face, null, true);
+            if (!isActualAirBlock(state.blockName().toLowerCase())) {
+                return new RaycastResult(x, y, z, previousX, previousY, previousZ, distance, face, state, false);
+            }
+            previousX = x;
+            previousY = y;
+            previousZ = z;
+            if (tMaxX <= tMaxY && tMaxX <= tMaxZ) {
+                distance = tMaxX;
+                tMaxX += deltaX;
+                x += stepX;
+                face = stepX > 0 ? "WEST" : "EAST";
+            } else if (tMaxY <= tMaxZ) {
+                distance = tMaxY;
+                tMaxY += deltaY;
+                y += stepY;
+                face = stepY > 0 ? "DOWN" : "UP";
+            } else {
+                distance = tMaxZ;
+                tMaxZ += deltaZ;
+                z += stepZ;
+                face = stepZ > 0 ? "NORTH" : "SOUTH";
+            }
+        }
+        return new RaycastResult(x, y, z, previousX, previousY, previousZ, distance, face, null, false);
+    }
+
+    private record RaycastResult(
+        int x, int y, int z,
+        int previousX, int previousY, int previousZ,
+        double distance, String face, BlockState state, boolean unknown
+    ) {}
 
     @Tool("环顾四周：一次性获取脚下/身体/头顶的方块、东南西北四个方向的通畅情况、头顶净空、以及附近的危险方块(岩浆/火/仙人掌等)。这是了解自身处境的首选感知工具。")
     public String scanSurroundings() {
@@ -687,11 +797,11 @@ public class PerceptionTools {
         return result.toString();
     }
 
-    @Tool("在指定绝对坐标半开区间内模糊搜索方块名称，结果附带方块状态（如门 open=true/false、facing 朝向）。min 与 max_exclusive 必须直接复制 CLMCP 搜索结果返回的三整数数组，格式为 min:[x,y,z]、max_exclusive:[x,y,z]，不要拆分或重排坐标。搜到门后先看 open：open=false 表示关着，可用 interactBlock 右键打开。")
+    @Tool("在指定绝对坐标半开区间内模糊搜索方块名称，结果附带方块状态（如门 open=true/false、facing 朝向）。min 与 max_exclusive 是 [x,y,z] 三整数数组。搜到门后可根据 open 状态判断是否需要用 interactBlock 打开。")
     public String findSpecificBlocksInBounds(
             @P("要查找的方块名称或ID片段，如'door', 'stairs', 'dark_oak'") String blockNameQuery,
-            @P("最小坐标三整数数组 [x,y,z]，包含；直接复制 CLMCP 搜索结果 bounds.min") int[] min,
-            @P("最大坐标三整数数组 [x,y,z]，不包含；直接复制 CLMCP 搜索结果 bounds.max_exclusive") int[] max_exclusive,
+            @P("最小坐标三整数数组 [x,y,z]，包含") int[] min,
+            @P("最大坐标三整数数组 [x,y,z]，不包含") int[] max_exclusive,
             @P("最多返回多少个坐标(1-100，建议30)") int limit) {
         if (blockNameQuery == null || blockNameQuery.isBlank()) {
             return "方块名称查询不能为空。";
@@ -740,7 +850,7 @@ public class PerceptionTools {
                     if (state == null || state.blockName() == null) continue;
                     String name = state.blockName();
                     String lowerName = name.toLowerCase();
-                    if (lowerName.contains(lowerQuery) && !lowerName.contains("air")) {
+                    if (lowerName.contains(lowerQuery) && !isActualAirBlock(lowerName)) {
                         found.add(new FoundBlock(x, y, z, reference.distance(new Vector3d(x, y, z)), name, formatState(state)));
                     }
                 }

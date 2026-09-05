@@ -31,7 +31,7 @@
    mvn clean package
    ```
 2. **部署**：
-   将 `target/XinClaw-1.0-SNAPSHOT.jar` 放入 Xinbot 的 `plugins` 文件夹。
+   将 `target/XinClaw-1.0.0.jar`（或从 [Releases](https://github.com/huangdihd/xinclaw/releases) 下载的同名文件）放入 Xinbot 的 `plugins` 文件夹。需要 Xinbot `2.0.1-RELEASE` 和 MovementSync `1.9.0-RELEASE`；这两个依赖不包含在插件 JAR 内。
 3. **初始化配置**：
    首次启动机器人后，插件会自动在 `plugins/XinClaw/` 目录下生成 `config.properties`（旧版本的 `plugins/XinAgent/` 数据目录会被自动迁移）。
 4. **填入 API Key**：
@@ -70,11 +70,8 @@ private_message_blacklist=back,help
 reasoning/content 流片段、模型响应、工具参数、完整工具返回、Agent 输入/输出及错误。
 Benchmark 等外部插件应直接订阅该接口，不应再解析控制台日志。
 
-若工具列表提供 CLMCP，开放词汇结构定位会优先执行完整 CLMCP 计划；模型自行选择
-`topK=1..8`。全局 Rank-1 只表示语义候选区域，不是入口或精确站立点。Agent 可在该
-bounds 内用 `getAreaMapAt(min, max_exclusive, mapMinY, mapMaxYExclusive)` 一次覆盖候选 XZ
-并细化 footprint、地面和入口，再选择精确点寻路；普通任意中心地图使用
-`getAreaMapAtPoint`，不得脱离候选范围用远程地图重新做全局扫描。
+外部插件可以通过 `AgentToolRegistry` 注册额外工具；XinClaw 会把工具 schema 和结果
+交给模型，但核心运行时不依赖任何特定外部检索或感知模型。
 
 ## 🎮 指令使用
 

@@ -73,6 +73,34 @@ final class OpenAiCompatibleReasoningStreamingChatLanguageModelTest {
     }
 
     @Test
+    void reasoningFingerprintHasFixedSizeAndDoesNotRetainMessageText() {
+        String sensitiveText = "large-sensitive-response-" + "x".repeat(10_000);
+        String fingerprint = OpenAiCompatibleReasoningStreamingChatLanguageModel.messageFingerprint(
+            AiMessage.from(sensitiveText));
+
+        assertEquals(64, fingerprint.length());
+        assertFalse(fingerprint.contains("large-sensitive-response"));
+    }
+
+    @Test
+    void reasoningSidecarEvictsLeastRecentlyUsedMessages() {
+        OpenAiCompatibleReasoningStreamingChatLanguageModel model = new OpenAiCompatibleReasoningStreamingChatLanguageModel(
+            "secret", baseUrl, "reasoning-model-v4", Duration.ofSeconds(5), "high",
+            new AgentTracePublisher(System::nanoTime)
+        );
+        AiMessage first = AiMessage.from("message-0");
+        model.rememberReasoning(first, "reasoning-0");
+        for (int index = 1; index <= OpenAiCompatibleReasoningStreamingChatLanguageModel.MAX_REASONING_ENTRIES; index++) {
+            model.rememberReasoning(AiMessage.from("message-" + index), "reasoning-" + index);
+        }
+
+        assertEquals(OpenAiCompatibleReasoningStreamingChatLanguageModel.MAX_REASONING_ENTRIES,
+            model.reasoningCacheSize());
+        assertNull(model.reasoningFor(first), "oldest reasoning entry must be evicted");
+        assertEquals("reasoning-256", model.reasoningFor(AiMessage.from("message-256")));
+    }
+
+    @Test
     void preservesReasoningStreamsVisibleTextAndReplaysReasoningWithToolResults() throws Exception {
         AgentTracePublisher publisher = new AgentTracePublisher(System::nanoTime);
         List<AgentTraceEvent> trace = new ArrayList<>();

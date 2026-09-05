@@ -175,10 +175,10 @@ public class MovementTools {
         // 预检查路径是否通畅
         DStarLite pf = new DStarLite(start, goal, new DefaultPathfindingContext(
             MovementSync.INSTANCE.getWorld(), digAllowed));
-        List<xin.bbtt.pathfinding.PathStep> path = pf.findPath(2000); 
+        List<xin.bbtt.pathfinding.PathStep> path = pf.findPath(2000);
 
         if (path == null || path.size() <= 1) {
-            return String.format("寻路失败：无法找到前往坐标 (%.1f, %.1f, %.1f) 的可行路径（当前挖掘许可：%s）。目标可能在加载范围外，或者被完全封死；关门建筑请先用 interactBlock 开门，或尝试先向那个方向走一段路(walkTo)再重新寻路。", x, y, z, resolveAllowDig(allowDig) ? "允许挖掘" : "禁止挖掘");
+            return String.format("寻路失败：无法找到前往坐标 (%.1f, %.1f, %.1f) 的可行路径（当前挖掘许可：%s）。目标可能在加载范围外，或者被完全封死；关门建筑请先用 interactBlock 开门，或尝试先向那个方向走一段路(walkTo)再重新寻路。", x, y, z, digAllowed ? "允许挖掘" : "禁止挖掘");
         }
 
         // 使用 MovementSync 1.3.3+ 内置的寻路引擎
@@ -186,7 +186,7 @@ public class MovementTools {
         org.joml.Vector3i targetPos = new org.joml.Vector3i((int) Math.floor(x), (int) Math.floor(y), (int) Math.floor(z));
         MovementSync.INSTANCE.startStaticNavigation(targetPos, digAllowed);
 
-        return String.format("已启动内置寻路引擎，寻路成功（包含 %d 个节点），开始前往坐标 (%.2f, %.2f, %.2f)。挖掘许可：%s。%s", path.size(), x, y, z, resolveAllowDig(allowDig) ? "允许挖掘挡路方块" : "不挖掘任何方块", binding.implicit() ? "已创建内部续航任务，到达或卡住后系统会再次唤醒你。" : "已绑定任务 ID: " + binding.taskId());
+        return String.format("已启动内置寻路引擎，寻路成功（包含 %d 个节点），开始前往坐标 (%.2f, %.2f, %.2f)。挖掘许可：%s。%s", path.size(), x, y, z, digAllowed ? "允许挖掘挡路方块" : "不挖掘任何方块", binding.implicit() ? "已创建内部续航任务，到达或卡住后系统会再次唤醒你。" : "已绑定任务 ID: " + binding.taskId());
     }
 
     @Tool({
@@ -229,10 +229,10 @@ public class MovementTools {
         return formatDirectPathPreview(goal, path, digAllowed);
     }
 
-    @Tool("在指定半开区间内寻找最近可达站立点。min 与 max_exclusive 必须直接复制 CLMCP 搜索结果返回的 [x,y,z] 三整数数组，不要拆分或重排。默认不挖掘(allowDig=false)，路线不会破坏任何方块。不会移动机器人。")
+    @Tool("在指定半开区间内寻找最近可达站立点。min 与 max_exclusive 是 [x,y,z] 三整数数组。默认不挖掘(allowDig=false)，路线不会破坏任何方块。不会移动机器人。")
     public String findReachablePointInBounds(
-            @P("最小坐标 [x,y,z]，直接复制 CLMCP 搜索结果 bounds.min") int[] min,
-            @P("最大坐标 [x,y,z]，直接复制 CLMCP 搜索结果 bounds.max_exclusive") int[] max_exclusive,
+            @P("最小坐标 [x,y,z]，包含") int[] min,
+            @P("最大坐标 [x,y,z]，不包含") int[] max_exclusive,
             @P(value = "是否允许检查寻路时挖掘挡路的方块；不填默认 false（不挖掘）", required = false)
             Boolean allowDig) {
         logger.info(
@@ -301,10 +301,10 @@ public class MovementTools {
         }
     }
 
-    @Tool("智能寻路到指定半开区间内最近的可达站立点。min 与 max_exclusive 必须直接复制 CLMCP 搜索结果返回的 [x,y,z] 三整数数组，不要拆分或重排。默认不挖掘；allowDig=true 才允许挖掘。taskId 留空时自动创建内部 IN_PROGRESS 续航任务，保证到达或卡住后再次唤醒。")
+    @Tool("智能寻路到指定半开区间内最近的可达站立点。min 与 max_exclusive 是 [x,y,z] 三整数数组。默认不挖掘；allowDig=true 才允许挖掘。taskId 留空时自动创建内部 IN_PROGRESS 续航任务，保证到达或卡住后再次唤醒。")
     public String pathfindToBounds(
-            @P("最小坐标 [x,y,z]，直接复制 CLMCP 搜索结果 bounds.min") int[] min,
-            @P("最大坐标 [x,y,z]，直接复制 CLMCP 搜索结果 bounds.max_exclusive") int[] max_exclusive,
+            @P("最小坐标 [x,y,z]，包含") int[] min,
+            @P("最大坐标 [x,y,z]，不包含") int[] max_exclusive,
             @P(value = "是否允许寻路时挖掘挡路的方块；不填默认 false（不挖掘）。开门请用 interactBlock，不要靠挖掘穿墙", required = false)
             Boolean allowDig,
             @P("绑定的任务ID；不绑定时传空字符串") String taskId) {
@@ -450,7 +450,7 @@ public class MovementTools {
         if (MovementSync.INSTANCE == null || MovementSync.INSTANCE.movementController == null) {
             return "MovementSync 插件尚未就绪。";
         }
-        MovementSync.INSTANCE.movementController.cancelAll();
+        MovementSync.INSTANCE.cancelNavigation();
         return "已成功停止所有的寻路和移动任务。";
     }
 

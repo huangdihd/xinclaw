@@ -31,6 +31,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.List;
 import xin.claw.listeners.PrivateMessageListener;
+import xin.claw.listeners.ItemPickupListener;
 import xin.claw.trackers.DimensionTracker;
 import xin.claw.trackers.InventoryTracker;
 import xin.claw.tasks.Task;
@@ -48,6 +49,7 @@ public class XinClawPlugin implements Plugin {
     public ExecutorService executorService;
     private ScheduledExecutorService scheduler;
     private volatile boolean teleportAgentNotificationsSuppressed;
+    private ItemPickupListener itemPickupListener;
     
     // 用于将任务系统与寻路系统融合
     public String currentMovementTaskId = null;
@@ -75,6 +77,7 @@ public class XinClawPlugin implements Plugin {
     @Override
     public void onUnload() {
         logger.info("Unloading XinClawPlugin...");
+        clearPickupNotifications();
     }
 
     @Override
@@ -115,6 +118,11 @@ public class XinClawPlugin implements Plugin {
             Bot.INSTANCE.getPluginManager().events().registerEvents(new xin.claw.listeners.DeathListener(), this);
             logger.info("DeathListener initialized.");
 
+            itemPickupListener = new ItemPickupListener();
+            agentManager.setDeferredProcessingCheck(itemPickupListener::onProcessingAvailable);
+            Bot.INSTANCE.getPluginManager().events().registerEvents(itemPickupListener, this);
+            logger.info("ItemPickupListener initialized.");
+
             // 启动自主任务循环（间隔可通过 task_loop_interval_seconds 配置）
             startTaskLoop();
         } catch (Throwable e) {
@@ -149,8 +157,7 @@ public class XinClawPlugin implements Plugin {
                             
                             if (dist < 2.0) {
                                 // 到达目标
-                                MovementSync.INSTANCE.setActiveGoal(null);
-                                MovementSync.INSTANCE.getMovementController().cancelAll();
+                                MovementSync.INSTANCE.cancelNavigation();
                                 
                                 // 自动融合任务系统：如果绑定了任务，则自动标记为完成
                                 if (currentMovementTaskId != null && agentManager != null && agentManager.getTaskManager() != null) {
@@ -169,8 +176,7 @@ public class XinClawPlugin implements Plugin {
                                 }
                             } else if (!isMoving) {
                                 // 静止但未到达目标 (意味着卡死在路上了)
-                                MovementSync.INSTANCE.setActiveGoal(null);
-                                MovementSync.INSTANCE.getMovementController().cancelAll();
+                                MovementSync.INSTANCE.cancelNavigation();
                                 statusContext = String.format("\n[状态提示] 寻路已强制中断！你设定了前往 (%d, %d, %d) 的目标，但机器人目前被完全卡住静止 (距离目标还有 %.1f 格)。为防止死循环，系统已自动取消该次寻路。请务必检查周围环境(方块)，必要时挖掘障碍物、搭桥或换个坐标重新寻路。", goal.x, goal.y, goal.z, dist);
                             } else {
                                 statusContext = String.format("\n[状态提示] 机器人目前正在向寻路目标 (%d, %d, %d) 移动中，当前距离目标还有 %.1f 格。你可以通过 stopWalking 随时打断寻路，或查阅其它工具。如果不打算打断移动，请仅简短回复正在路上即可。", goal.x, goal.y, goal.z, dist);
@@ -268,6 +274,7 @@ public class XinClawPlugin implements Plugin {
     @Override
     public void onDisable() {
         logger.info("Disabling XinClawPlugin.");
+        clearPickupNotifications();
         if (scheduler != null) {
             scheduler.shutdownNow();
         }
@@ -281,5 +288,10 @@ public class XinClawPlugin implements Plugin {
                 executorService.shutdownNow();
             }
         }
+    }
+
+    private void clearPickupNotifications() {
+        if (agentManager != null) agentManager.setDeferredProcessingCheck(null);
+        if (itemPickupListener != null) itemPickupListener.clearPending();
     }
 }

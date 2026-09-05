@@ -129,6 +129,21 @@ final class PerceptionToolsRegionTest {
     }
 
     @Test
+    void boundedSearchDoesNotMistakeStairsForAir() {
+        PerceptionTools tools = tools(
+            Map.of("10,64,20", block("oak_stairs", "block")),
+            new Vector3d(9.5, 64, 20.5)
+        );
+
+        String result = tools.findSpecificBlocksInBounds(
+            "stairs", new int[] {10, 64, 20}, new int[] {11, 65, 21}, 20
+        );
+
+        assertTrue(result.contains("oak_stairs"), result);
+        assertTrue(result.contains("(10,64,20)"), result);
+    }
+
+    @Test
     void rejectsOversizedBoundedBlockSearch() {
         PerceptionTools tools = tools(Map.of(), new Vector3d());
 

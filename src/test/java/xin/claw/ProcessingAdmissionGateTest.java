@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 
@@ -58,5 +59,48 @@ final class ProcessingAdmissionGateTest {
         assertEquals(
             ProcessingAdmissionGate.Result.BUSY,
             gate.tryAcquire(slot, new Thread(), () -> true));
+    }
+
+    @Test
+    void reservedUserAdmissionWinsOverDeferredDrainWithoutLosingIt() {
+        ProcessingAdmissionGate gate = new ProcessingAdmissionGate();
+        AtomicReference<Thread> slot = new AtomicReference<>();
+        AtomicInteger drains = new AtomicInteger();
+        ProcessingAdmissionGate.PriorityAdmission user = gate.reservePriorityAdmission();
+        Thread notification = new Thread();
+
+        assertEquals(
+            ProcessingAdmissionGate.Result.BUSY,
+            gate.tryAcquireDeferred(slot, notification, () -> true, drains::incrementAndGet));
+        assertNull(slot.get(), "deferred work must not run in parallel with a pending user message");
+        assertEquals(0, drains.get(), "failed admission must preserve the undrained notification");
+
+        Thread userThread = Thread.currentThread();
+        assertEquals(
+            ProcessingAdmissionGate.Result.ACQUIRED,
+            gate.tryAcquirePriority(slot, userThread, () -> true, user));
+        assertSame(userThread, slot.get());
+        assertFalse(userThread.isInterrupted(), "notification admission must never interrupt user processing");
+
+        slot.set(null);
+        assertEquals(
+            ProcessingAdmissionGate.Result.ACQUIRED,
+            gate.tryAcquireDeferred(slot, notification, () -> true, () -> {
+                assertSame(notification, slot.get(), "slot must be held before notification state drains");
+                drains.incrementAndGet();
+            }));
+        assertEquals(1, drains.get());
+    }
+
+    @Test
+    void cancellingAReservedUserAdmissionUnblocksDeferredWork() {
+        ProcessingAdmissionGate gate = new ProcessingAdmissionGate();
+        AtomicReference<Thread> slot = new AtomicReference<>();
+        ProcessingAdmissionGate.PriorityAdmission user = gate.reservePriorityAdmission();
+        gate.cancelPriorityAdmission(user);
+
+        assertEquals(
+            ProcessingAdmissionGate.Result.ACQUIRED,
+            gate.tryAcquireDeferred(slot, Thread.currentThread(), () -> true, () -> {}));
     }
 }

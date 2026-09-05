@@ -66,10 +66,9 @@ public class AgentManager {
             "2. 移动能力：内置寻路 (pathfindTo) 默认不挖掘：不会破坏任何方块，遇到障碍只绕行、跳跃或搭桥；allowDig=true 才允许挖掘挡路的方块。在机器人的底层引擎跑图时，系统会**自动静默**，绝不会打扰你；只有当它卡住或到达目标时才会发系统事件唤醒你。因此，**如果你刚才下达了移动指令，请直接结束对话，不要画蛇添足地使用 addIdleMovement 强行让自己等待，这会浪费你的算力！**",
             "3. 关门通行：自动寻路不会自动开门，关着的门会被当成碰撞障碍。遇到建筑入口时，先用 pathfindTo（默认不挖掘）到门外相邻可达格；确认到达后，用 findSpecificBlocks 查询小半径内的 door 并读取状态。若 open=false，对门的下半扇坐标调用 interactBlock；再次查询确认 open=true 后，再调用 pathfindTo 进入室内。禁止提前把开门与室内寻路一起入队，不要反复 pathfindTo 尝试穿越关门，也禁止通过挖掘建筑墙体、屋顶或地形来进入建筑（allowDig=true 只允许挖掘天然地形挡路方块，不允许挖建筑本体）。",
             "4. 空间理解：你的坐标通常指你脚底所在的方块，因此与你处于同一高度的方块是y，你眼睛（头部）平齐的方块是y+1，而在你脑袋正上方的方块则是y+2。",
-            "5. 感知工具的选择：想快速了解自身处境(脚下/四向/危险)时优先用 scanSurroundings；想直观理解周围布局、规划路线或建筑时用 getAreaMap 获取俯视字符地图(上北下南左西右东)。普通条件下做全局探索时先调用 getLoadedChunks 获取全部已加载 chunk 及方块坐标范围，再用 findSpecificBlocks 搜索标志方块；findSpecificBlocks 最大半径64，可用60-64覆盖当前测试区域。不得因为小半径没结果就凭空编造『制高点』或探索坐标；导航坐标必须来自工具返回的方块、地图或可达点证据。",
-            "6. 区域作用域与行动验证：当 searchLoadedVoxelRegions 或 searchVoxelRegion 返回语义候选 bounds 后，旧的当前位置工具仍可用于普通任务，但不要丢弃候选区域。调用 findSpecificBlocksInBounds、findReachablePointInBounds、previewPathToBounds 或 pathfindToBounds 时，必须把 bounds.min 和 bounds.max_exclusive 两个 [x,y,z] 数组原样复制到同名参数，禁止拆成六个数或重排坐标。",
-            "7. 路线预览：previewPathTo 是绝对坐标点的只读路径预览，决定执行后再调用 pathfindTo；previewPathToBounds 是候选半开区域的只读路径预览，决定执行后再调用 pathfindToBounds。两者都只计算并返回选定目标、寻路节点和移动类型，不会设置导航目标或移动机器人。需要先理解从哪一侧接近、最后几步落在哪里时可以调用。",
-            "8. 如果工具列表中提供 CLMCP 语义搜索，searchLoadedVoxelRegions 可搜索全部已加载区块，searchVoxelRegion 可搜索指定区域；返回的是语义候选区域，score 相似度不是概率。keyword、chunkSize、topK，以及是否继续使用地图、方块查询、路线预览或移动工具，均由你根据任务和已有证据决定；没有固定工具链或强制 rank 顺序，避免没有新信息的重复查询。",
+            "5. 空间感知工具语义：scanSurroundings 返回脚下、四向障碍和危险摘要；getAreaMap 与 getAreaMapAt 返回俯视字符地图；getLoadedChunks 返回已加载区块范围；findSpecificBlocks 与 findSpecificBlocksInBounds 返回匹配方块及状态。导航坐标必须来自工具返回的方块、地图或可达点证据。",
+            "6. 区域工具使用半开 bounds：min 包含、max_exclusive 不包含，二者均为 [x,y,z] 三整数数组。findSpecificBlocksInBounds、findReachablePointInBounds、previewPathToBounds 和 pathfindToBounds 使用相同 bounds 语义。",
+            "7. 路线预览：previewPathTo 预览绝对坐标点路线；previewPathToBounds 预览半开区域内可达点路线。两者只返回选定目标、寻路节点和移动类型，不会设置导航目标或移动机器人。",
             "【工具行动铁律】",
             "- 收到需要在游戏中执行、搜索、移动、建造、交互或管理任务的指令时，必须在当前回复中调用至少一个实际工具；不允许把行动推迟到下一轮。",
             "- 禁止只说『我会开始』『I'll start』『接下来我将……』『Let me...』然后不调用工具。口头承诺不是行动，也不能作为本轮的最终回复。",
@@ -94,11 +93,26 @@ public class AgentManager {
     public final java.util.concurrent.atomic.AtomicReference<Thread> processingThread = new java.util.concurrent.atomic.AtomicReference<>(null);
     private final ProcessingAdmissionGate processingAdmissionGate = new ProcessingAdmissionGate();
     private final java.util.concurrent.atomic.AtomicBoolean memoryClearRequested = new java.util.concurrent.atomic.AtomicBoolean(false);
+    private final java.util.concurrent.atomic.AtomicReference<ProcessingAdmissionGate.PriorityAdmission> currentPriorityAdmission =
+        new java.util.concurrent.atomic.AtomicReference<>();
+    private volatile Runnable deferredProcessingCheck;
 
     public AgentManager() {
         this.taskManager = new TaskManager();
         this.tracePublisher = new AgentTracePublisher();
-        this.toolRegistry = new AgentToolRegistry(java.util.List.of(
+        this.toolRegistry = createToolRegistry(taskManager);
+        initAgent();
+    }
+
+    AgentManager(BotAgent agent, TaskManager taskManager) {
+        this.taskManager = java.util.Objects.requireNonNull(taskManager, "taskManager");
+        this.tracePublisher = new AgentTracePublisher();
+        this.toolRegistry = createToolRegistry(taskManager);
+        this.agent = java.util.Objects.requireNonNull(agent, "agent");
+    }
+
+    private static AgentToolRegistry createToolRegistry(TaskManager taskManager) {
+        return new AgentToolRegistry(java.util.List.of(
             new MovementTools(),
             new PerceptionTools(),
             new SystemTools(),
@@ -108,7 +122,6 @@ public class AgentManager {
             new ActionTools(),
             new TaskTools(taskManager)
         ));
-        initAgent();
     }
 
     public boolean isProcessing() {
@@ -214,28 +227,59 @@ public class AgentManager {
             return;
         }
 
+        ProcessingAdmissionGate.PriorityAdmission priorityAdmission =
+            processingAdmissionGate.reservePriorityAdmission();
+
         // 整个"打断旧会话→提交新会话"的流程放到线程池里并用锁串行化：
         // 既不阻塞事件线程（打断等待最长 5 秒），也避免多个触发源同时提交导致并发会话
-        executor.submit(() -> {
-            synchronized (submitLock) {
-                if (isProcessing() && onInterrupt != null) onInterrupt.run();
-                interruptProcessing();
+        try {
+            executor.submit(() -> {
+                try {
+                    synchronized (submitLock) {
+                        if (isProcessing() && onInterrupt != null) onInterrupt.run();
+                        interruptProcessing();
 
-                if (executor.isShutdown()) return;
-                final long seq = submissionSeq.incrementAndGet();
-                currentAgentTask = executor.submit(() -> {
-                    // 启动前确认自己仍是最新一条消息，被更新的提交取代时直接放弃
-                    if (submissionSeq.get() != seq) return;
-                    try {
-                        String response = processMessage(message);
-                        if (response == null || response.isEmpty()) return;
-                        onReply.accept(response);
-                    } catch (Exception e) {
-                        logger.error("Error while chatting with agent", e);
+                        if (executor.isShutdown()) {
+                            processingAdmissionGate.cancelPriorityAdmission(priorityAdmission);
+                            return;
+                        }
+                        final long seq = submissionSeq.incrementAndGet();
+                        currentPriorityAdmission.set(priorityAdmission);
+                        try {
+                            currentAgentTask = executor.submit(() -> {
+                                // 启动前确认自己仍是最新一条消息，被更新的提交取代时直接放弃
+                                if (submissionSeq.get() != seq) {
+                                    processingAdmissionGate.cancelPriorityAdmission(priorityAdmission);
+                                    currentPriorityAdmission.compareAndSet(priorityAdmission, null);
+                                    return;
+                                }
+                                try {
+                                    String response = processPriorityMessage(message, priorityAdmission);
+                                    if (response == null || response.isEmpty()) return;
+                                    onReply.accept(response);
+                                } catch (Exception e) {
+                                    logger.error("Error while chatting with agent", e);
+                                } finally {
+                                    currentPriorityAdmission.compareAndSet(priorityAdmission, null);
+                                }
+                            });
+                        } catch (RuntimeException rejected) {
+                            currentPriorityAdmission.compareAndSet(priorityAdmission, null);
+                            processingAdmissionGate.cancelPriorityAdmission(priorityAdmission);
+                            throw rejected;
+                        }
                     }
-                });
-            }
-        });
+                } catch (RuntimeException | Error failure) {
+                    currentPriorityAdmission.compareAndSet(priorityAdmission, null);
+                    processingAdmissionGate.cancelPriorityAdmission(priorityAdmission);
+                    scheduleDeferredProcessingCheck();
+                    throw failure;
+                }
+            });
+        } catch (RuntimeException rejected) {
+            processingAdmissionGate.cancelPriorityAdmission(priorityAdmission);
+            logger.warn("Failed to schedule agent message", rejected);
+        }
     }
 
     /**
@@ -247,10 +291,19 @@ public class AgentManager {
     public Thread requestInterruptProcessing() {
         java.util.concurrent.Future<?> task = currentAgentTask;
         currentAgentTask = null;
+        ProcessingAdmissionGate.PriorityAdmission priorityAdmission = currentPriorityAdmission.getAndSet(null);
+        if (priorityAdmission != null) {
+            processingAdmissionGate.cancelPriorityAdmission(priorityAdmission);
+        }
         if (task != null && !task.isDone()) {
             task.cancel(true);
         }
-        return requestProcessingThreadInterrupt(processingThread);
+        Thread target = requestProcessingThreadInterrupt(processingThread);
+        if (target == null && priorityAdmission != null) {
+            // A canceled queued conversation has no admitted finally block to wake pickups.
+            scheduleDeferredProcessingCheck();
+        }
+        return target;
     }
 
     static Thread requestProcessingThreadInterrupt(
@@ -300,46 +353,103 @@ public class AgentManager {
     }
 
     public String processMessageIf(String message, BooleanSupplier admissionAllowed) {
-        // Ensure the current thread's interrupt flag is cleared before starting, 
+        return processMessageInternal(message, admissionAllowed, null);
+    }
+
+    private String processPriorityMessage(
+            String message,
+            ProcessingAdmissionGate.PriorityAdmission priorityAdmission) {
+        return processMessageInternal(message, () -> true, priorityAdmission);
+    }
+
+    private String processMessageInternal(
+            String message,
+            BooleanSupplier admissionAllowed,
+            ProcessingAdmissionGate.PriorityAdmission priorityAdmission) {
+        // Ensure the current thread's interrupt flag is cleared before starting,
         // to prevent thread pool reuse issues causing InterruptedIOException.
         Thread.interrupted();
-        
+
         Thread current = Thread.currentThread();
         java.util.concurrent.atomic.AtomicReference<BotAgent> agentForCall = new java.util.concurrent.atomic.AtomicReference<>();
         java.util.concurrent.atomic.AtomicReference<PersistentChatMemoryStore> memoryStoreForCall = new java.util.concurrent.atomic.AtomicReference<>();
         // Lock order is always admission gate -> AgentManager lifecycle lock.
         // Reset/timeout use the same gate, so guard validation and processing-slot
         // acquisition cannot cross cleanup.
-        ProcessingAdmissionGate.Result admission = processingAdmissionGate.underGate(() -> {
+        BooleanSupplier prepareAdmission = () -> {
             synchronized (this) {
-                if (this.agent == null || !admissionAllowed.getAsBoolean()) {
-                    return ProcessingAdmissionGate.Result.REJECTED;
-                }
-                if (!processingThread.compareAndSet(null, current)) {
-                    return ProcessingAdmissionGate.Result.BUSY;
-                }
+                if (this.agent == null || !admissionAllowed.getAsBoolean()) return false;
                 agentForCall.set(this.agent);
                 memoryStoreForCall.set(this.memoryStore);
-                return ProcessingAdmissionGate.Result.ACQUIRED;
+                return true;
             }
-        });
+        };
+        ProcessingAdmissionGate.Result admission = priorityAdmission == null
+            ? processingAdmissionGate.tryAcquire(processingThread, current, prepareAdmission)
+            : processingAdmissionGate.tryAcquirePriority(
+                processingThread, current, prepareAdmission, priorityAdmission);
         if (admission == ProcessingAdmissionGate.Result.REJECTED) return "";
         if (admission == ProcessingAdmissionGate.Result.BUSY) {
             return "我现在正在思考上一条指令，请稍后再试！";
         }
 
+        return executeAdmittedMessage(message, current, agentForCall.get(), memoryStoreForCall.get());
+    }
+
+    public boolean tryProcessDeferredMessage(
+            java.util.function.Supplier<String> messageSupplier,
+            java.util.function.Consumer<String> onReply) {
+        java.util.Objects.requireNonNull(messageSupplier, "messageSupplier");
+        java.util.Objects.requireNonNull(onReply, "onReply");
+        Thread.interrupted();
+        Thread current = Thread.currentThread();
+        java.util.concurrent.atomic.AtomicReference<BotAgent> agentForCall = new java.util.concurrent.atomic.AtomicReference<>();
+        java.util.concurrent.atomic.AtomicReference<PersistentChatMemoryStore> memoryStoreForCall = new java.util.concurrent.atomic.AtomicReference<>();
+        java.util.concurrent.atomic.AtomicReference<String> messageForCall = new java.util.concurrent.atomic.AtomicReference<>();
+        ProcessingAdmissionGate.Result admission = processingAdmissionGate.tryAcquireDeferred(
+            processingThread,
+            current,
+            () -> {
+                synchronized (this) {
+                    if (this.agent == null) return false;
+                    agentForCall.set(this.agent);
+                    memoryStoreForCall.set(this.memoryStore);
+                    return true;
+                }
+            },
+            () -> messageForCall.set(messageSupplier.get())
+        );
+        if (admission != ProcessingAdmissionGate.Result.ACQUIRED) return false;
+
+        String message = messageForCall.get();
+        if (message == null || message.isBlank()) {
+            processingThread.compareAndSet(current, null);
+            scheduleDeferredProcessingCheck();
+            return false;
+        }
+        String response = executeAdmittedMessage(
+            message, current, agentForCall.get(), memoryStoreForCall.get());
+        if (response != null && !response.isEmpty()) onReply.accept(response);
+        return true;
+    }
+
+    private String executeAdmittedMessage(
+            String message,
+            Thread current,
+            BotAgent agentForCall,
+            PersistentChatMemoryStore memoryStoreForCall) {
         try {
             // 此刻确认没有对话在途，安全修复上一轮被打断时可能留下的残缺工具调用序列
-            if (memoryStoreForCall.get() != null) {
-                memoryStoreForCall.get().repairConversation("default");
+            if (memoryStoreForCall != null) {
+                memoryStoreForCall.repairConversation("default");
             }
             JsonObject inputTrace = new JsonObject();
             inputTrace.addProperty("text", message);
             tracePublisher.emit("agent_input", inputTrace);
             String response = executeWithActionGuard(
-                agentForCall.get(),
+                agentForCall,
                 message,
-                () -> memoryStoreForCall.get() == null ? 0L : memoryStoreForCall.get().completedToolExecutionCount()
+                () -> memoryStoreForCall == null ? 0L : memoryStoreForCall.completedToolExecutionCount()
             );
             JsonObject outputTrace = new JsonObject();
             outputTrace.addProperty("text", response);
@@ -358,14 +468,35 @@ public class AgentManager {
             logger.error("Agent error during processing:", e);
             return "Agent error: " + e.getMessage();
         } finally {
-            // Clear interrupt flag before returning thread to the pool
+            // Clear interrupt flag before returning thread to the pool.
             Thread.interrupted();
-            processingThread.compareAndSet(current, null);
-            // 对话期间收到的清记忆请求延迟到此刻执行，
-            // 避免在工具调用循环中途清空记忆导致持久化文件出现残缺的工具调用序列
-            if (memoryClearRequested.compareAndSet(true, false)) {
-                doClearMemoryNow();
+            try {
+                // 对话期间收到的清记忆请求延迟到此刻执行，
+                // 避免在工具调用循环中途清空记忆导致持久化文件出现残缺的工具调用序列
+                if (memoryClearRequested.compareAndSet(true, false)) {
+                    doClearMemoryNow();
+                }
+            } finally {
+                // The slot remains occupied through all cleanup, including cleanup failures.
+                processingThread.compareAndSet(current, null);
+                scheduleDeferredProcessingCheck();
             }
+        }
+    }
+
+    public void setDeferredProcessingCheck(Runnable check) {
+        deferredProcessingCheck = check;
+    }
+
+    private void scheduleDeferredProcessingCheck() {
+        Runnable check = deferredProcessingCheck;
+        java.util.concurrent.ExecutorService executor =
+            XinClawPlugin.INSTANCE != null ? XinClawPlugin.INSTANCE.executorService : null;
+        if (check == null || executor == null || executor.isShutdown()) return;
+        try {
+            executor.submit(check);
+        } catch (RuntimeException rejected) {
+            logger.debug("Deferred processing check was not scheduled", rejected);
         }
     }
 

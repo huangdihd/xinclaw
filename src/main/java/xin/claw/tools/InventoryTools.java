@@ -22,6 +22,7 @@ import dev.langchain4j.agent.tool.Tool;
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 import org.geysermc.mcprotocollib.protocol.data.game.inventory.ClickItemAction;
 import org.geysermc.mcprotocollib.protocol.data.game.inventory.ContainerActionType;
+import org.geysermc.mcprotocollib.protocol.data.game.inventory.ShiftClickItemAction;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.inventory.ServerboundContainerClickPacket;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -110,6 +111,79 @@ public class InventoryTools {
         ));
 
         return "已向服务器发送点击容器 (ID: " + containerId + ") 的槽位 " + slot + " 的请求（动作：" + action.name() + "）。";
+    }
+
+    @Tool("把当前打开的箱子或其他外部容器中指定槽位的一整组物品快速转移到机器人背包。只允许外部容器槽，不会把背包物品反向放进容器。结果是服务器请求；可再次调用 getInventory 确认。")
+    public String takeContainerItem(@P("外部容器槽位号，来自 getInventory 输出") int slot) {
+        logger.info("[AI Tool Call] takeContainerItem(slot={})", slot);
+        if (Bot.INSTANCE == null || XinClawPlugin.INSTANCE == null
+                || XinClawPlugin.INSTANCE.inventoryTracker == null) {
+            return "Bot或物品栏追踪器未初始化。";
+        }
+        int containerId = XinClawPlugin.INSTANCE.inventoryTracker.getCurrentContainerId();
+        if (containerId == 0) return "当前没有打开外部容器。";
+        org.geysermc.mcprotocollib.protocol.data.game.item.ItemStack[] items =
+            XinClawPlugin.INSTANCE.inventoryTracker.getInventory();
+        if (items == null) return "当前容器内容尚未同步，请稍后重试。";
+        int externalSlotCount = Math.max(0, items.length - 36);
+        if (slot < 0 || slot >= externalSlotCount) {
+            return "槽位不属于外部容器；有效范围为 0-" + Math.max(0, externalSlotCount - 1) + "。";
+        }
+        org.geysermc.mcprotocollib.protocol.data.game.item.ItemStack item = items[slot];
+        if (item == null || item.getAmount() <= 0) return "指定容器槽位为空。";
+
+        int stateId = XinClawPlugin.INSTANCE.inventoryTracker.getCurrentStateId();
+        Bot.INSTANCE.getSession().send(new ServerboundContainerClickPacket(
+            containerId,
+            stateId,
+            slot,
+            ContainerActionType.SHIFT_CLICK_ITEM,
+            ShiftClickItemAction.LEFT_CLICK,
+            null,
+            new Int2ObjectOpenHashMap<>()
+        ));
+        String itemName = ItemStateParser.INSTANCE.getItemName(item.getId());
+        return String.format(
+            "已请求把容器槽位 %d 的 %s x%d 快速转移到背包；请再次调用 getInventory 确认服务器结果。",
+            slot, itemName, item.getAmount());
+    }
+
+    @Tool("把当前打开外部容器时，玩家背包区域指定槽位的一整组物品快速放入容器。只允许窗口中的玩家背包槽，不会误取容器物品。结果是服务器请求；可再次调用 getInventory 确认。")
+    public String putInventoryItemIntoContainer(
+            @P("玩家背包在当前容器窗口中的槽位号，来自 getInventory 输出") int slot) {
+        logger.info("[AI Tool Call] putInventoryItemIntoContainer(slot={})", slot);
+        if (Bot.INSTANCE == null || XinClawPlugin.INSTANCE == null
+                || XinClawPlugin.INSTANCE.inventoryTracker == null) {
+            return "Bot或物品栏追踪器未初始化。";
+        }
+        int containerId = XinClawPlugin.INSTANCE.inventoryTracker.getCurrentContainerId();
+        if (containerId == 0) return "当前没有打开外部容器。";
+        org.geysermc.mcprotocollib.protocol.data.game.item.ItemStack[] items =
+            XinClawPlugin.INSTANCE.inventoryTracker.getInventory();
+        if (items == null) return "当前容器内容尚未同步，请稍后重试。";
+        int externalSlotCount = Math.max(0, items.length - 36);
+        if (slot < externalSlotCount || slot >= items.length) {
+            return String.format(
+                "槽位不属于玩家背包区域；当前窗口有效范围为 %d-%d。",
+                externalSlotCount, Math.max(externalSlotCount, items.length - 1));
+        }
+        org.geysermc.mcprotocollib.protocol.data.game.item.ItemStack item = items[slot];
+        if (item == null || item.getAmount() <= 0) return "指定玩家背包槽位为空。";
+
+        int stateId = XinClawPlugin.INSTANCE.inventoryTracker.getCurrentStateId();
+        Bot.INSTANCE.getSession().send(new ServerboundContainerClickPacket(
+            containerId,
+            stateId,
+            slot,
+            ContainerActionType.SHIFT_CLICK_ITEM,
+            ShiftClickItemAction.LEFT_CLICK,
+            null,
+            new Int2ObjectOpenHashMap<>()
+        ));
+        String itemName = ItemStateParser.INSTANCE.getItemName(item.getId());
+        return String.format(
+            "已请求把玩家背包槽位 %d 的 %s x%d 快速放入容器；请再次调用 getInventory 确认服务器结果。",
+            slot, itemName, item.getAmount());
     }
 }
 

@@ -12,9 +12,9 @@ import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 /**
- * Navigation must be dig-free unless the agent explicitly opts in:
- * the benchmark forbids mining through closed-door buildings, so every
- * navigation tool publishes allowDig (optional, default false).
+ * Navigation must be dig-free unless the caller explicitly opts in:
+ * every navigation tool publishes allowDig as an optional parameter whose
+ * omission keeps the planned path non-destructive.
  */
 final class MovementToolsAllowDigTest {
     private static final List<String> NAVIGATION_TOOLS = List.of(

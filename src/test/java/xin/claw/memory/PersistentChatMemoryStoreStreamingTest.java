@@ -6,6 +6,7 @@ import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.ToolExecutionResultMessage;
 import dev.langchain4j.data.message.UserMessage;
+
 import java.nio.file.Path;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -100,5 +101,27 @@ final class PersistentChatMemoryStoreStreamingTest {
             AiMessage.from("new tool-less answer")
         ));
         assertEquals(1L, reopened.completedToolExecutionCount());
+    }
+
+    @Test
+    void toolEventSnapshotsGrowWithTheRetainedMemoryHistory(@TempDir Path directory) {
+        PersistentChatMemoryStore store = new PersistentChatMemoryStore(directory.toString());
+        int total = 513;
+        List<ChatMessage> history = new java.util.ArrayList<>();
+        for (int index = 0; index < total; index++) {
+            String id = "call-" + index;
+            dev.langchain4j.agent.tool.ToolExecutionRequest request = dev.langchain4j.agent.tool.ToolExecutionRequest.builder()
+                .id(id)
+                .name("whereAmI")
+                .arguments("{}")
+                .build();
+            history.add(AiMessage.from(List.of(request)));
+            history.add(ToolExecutionResultMessage.from(id, "whereAmI", "ok"));
+        }
+        store.updateMessages("default", history);
+
+        assertEquals(total, store.completedToolExecutionCount());
+        assertEquals(total, store.trackedCompletedToolIdCount());
+        assertEquals(total, store.trackedToolCallIdCount());
     }
 }

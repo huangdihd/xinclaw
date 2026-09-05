@@ -39,6 +39,16 @@ import xin.bbtt.movements.DigBlockMovement;
 
 public class ActionTools {
     private static final Logger logger = LoggerFactory.getLogger(ActionTools.class);
+    private final java.util.function.IntFunction<xin.bbtt.Entity.Entity> entityLookup;
+
+    public ActionTools() {
+        this(entityId -> MovementSync.INSTANCE == null || MovementSync.INSTANCE.getWorld() == null
+            ? null : MovementSync.INSTANCE.getWorld().getEntity(entityId));
+    }
+
+    ActionTools(java.util.function.IntFunction<xin.bbtt.Entity.Entity> entityLookup) {
+        this.entityLookup = java.util.Objects.requireNonNull(entityLookup, "entityLookup");
+    }
 
     private int getLatestSequence() {
         return Bot.INSTANCE.getAndIncreaseSequence();
@@ -58,9 +68,9 @@ public class ActionTools {
         }
 
         if (MovementSync.INSTANCE != null && MovementSync.INSTANCE.getWorld() != null) {
-            xin.bbtt.Entity.Entity entity = MovementSync.INSTANCE.getWorld().getEntity(entityId);
+            xin.bbtt.Entity.Entity entity = entityLookup.apply(entityId);
             if (entity != null && entity.getPosition() != null) {
-                MovementSync.INSTANCE.lookAt(entity.getPosition());
+                MovementSync.INSTANCE.directLookAt(entityAimPoint(entity));
             }
         }
 
@@ -74,6 +84,52 @@ public class ActionTools {
             Bot.INSTANCE.getSession().send(new ServerboundInteractPacket(entityId, action, Hand.MAIN_HAND, false));
             return "已尝试交互实体 ID " + entityId;
         }
+    }
+
+    @Tool("立即让机器人朝向指定实体的身体中心。这是一次性转向；不会设置持续目光目标，也不会移动或与实体交互。")
+    public String faceEntity(@P("实体 ID，可通过 getNearbyEntities 获取") int entityId) {
+        logger.info("[AI Tool Call] faceEntity(id={})", entityId);
+        if (MovementSync.INSTANCE == null) return "MovementSync 插件尚未就绪。";
+        xin.bbtt.Entity.Entity entity = entityLookup.apply(entityId);
+        if (entity == null || entity.getPosition() == null) return "未找到实体 ID " + entityId + "。";
+        MovementSync.INSTANCE.directLookAt(entityAimPoint(entity));
+        return String.format(
+            "entity_id=%d yaw=%.1f pitch=%.1f",
+            entityId, MovementSync.INSTANCE.yaw.get(), MovementSync.INSTANCE.pitch.get());
+    }
+
+    @Tool("设置持续方块目光目标。空闲时机器人会一直朝向该方块中心；其他需要朝向的动作可暂时覆盖，动作结束后自动恢复。")
+    public String setBlockGazeTarget(@P("方块 X") int x, @P("方块 Y") int y, @P("方块 Z") int z) {
+        if (MovementSync.INSTANCE == null) return "MovementSync 插件尚未就绪。";
+        MovementSync.INSTANCE.setBlockGazeTarget(new org.joml.Vector3i(x, y, z));
+        return "已设置持续目光目标: block=(" + x + "," + y + "," + z + ")";
+    }
+
+    @Tool("设置持续实体目光目标。空闲时机器人会跟随实体的实时位置转头；其他动作结束后自动恢复。")
+    public String setEntityGazeTarget(@P("实体 ID，可通过 getNearbyEntities 获取") int entityId) {
+        if (MovementSync.INSTANCE == null) return "MovementSync 插件尚未就绪。";
+        xin.bbtt.Entity.Entity entity = entityLookup.apply(entityId);
+        if (entity == null) return "未找到实体 ID " + entityId + "。";
+        MovementSync.INSTANCE.setEntityGazeTarget(entityId);
+        return "已设置持续目光目标: entity_id=" + entityId;
+    }
+
+    @Tool("查看当前持续目光目标；返回 none、方块坐标，或实体 ID 与实时位置。")
+    public String getGazeTarget() {
+        if (MovementSync.INSTANCE == null) return "MovementSync 插件尚未就绪。";
+        return MovementSync.INSTANCE.describeGazeTarget();
+    }
+
+    @Tool("清除持续目光目标。")
+    public String clearGazeTarget() {
+        if (MovementSync.INSTANCE == null) return "MovementSync 插件尚未就绪。";
+        MovementSync.INSTANCE.clearGazeTarget();
+        return "已清除持续目光目标。";
+    }
+
+    static org.joml.Vector3d entityAimPoint(xin.bbtt.Entity.Entity entity) {
+        return new org.joml.Vector3d(entity.getPosition())
+            .add(0, Math.max(0.1, entity.getHeight() * 0.5), 0);
     }
 
     @Tool("切换机器人的主手快捷栏物品(0-8)。")

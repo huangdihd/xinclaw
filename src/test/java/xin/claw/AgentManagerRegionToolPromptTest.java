@@ -10,23 +10,15 @@ import xin.claw.tools.PerceptionTools;
 
 final class AgentManagerRegionToolPromptTest {
     @Test
-    void systemPromptDescribesSemanticToolsWithoutPrescribingAWorkflow() throws Exception {
+    void systemPromptDescribesRegionToolsWithoutExternalModelCoupling() throws Exception {
         String prompt = AgentManager.configuredSystemPrompt();
 
-        assertTrue(prompt.contains("searchLoadedVoxelRegions"));
-        assertTrue(prompt.contains("searchVoxelRegion"));
-        assertTrue(prompt.contains("语义候选区域"));
-        assertTrue(prompt.contains("相似度不是概率"));
-        assertTrue(prompt.contains("由你根据任务和已有证据决定"));
-        assertTrue(prompt.contains("没有固定工具链或强制 rank 顺序"));
-        assertTrue(prompt.contains("bounds.min"));
-        assertTrue(prompt.contains("max_exclusive"));
-        assertFalse(prompt.contains("必须优先调用 searchLoadedVoxelRegions"));
-        assertFalse(prompt.contains("不得先平铺 getAreaMapAt"));
-        assertFalse(prompt.contains("Rank 1 的 min/max_exclusive 数组原样传给 getAreaMapAt"));
-        assertFalse(prompt.contains("mapMinY=地面Y-1"));
-        assertFalse(prompt.contains("mapMaxYExclusive=地面Y+4"));
-        assertFalse(prompt.contains("只有候选内证据证伪 Rank 1 后才尝试下一 rank"));
+        assertTrue(prompt.contains("findSpecificBlocksInBounds"));
+        assertTrue(prompt.contains("findReachablePointInBounds"));
+        assertTrue(prompt.contains("previewPathToBounds"));
+        assertTrue(prompt.contains("pathfindToBounds"));
+        assertTrue(prompt.contains("min 包含"));
+        assertTrue(prompt.contains("max_exclusive 不包含"));
 
         Method areaMapAt = PerceptionTools.class.getMethod(
             "getAreaMapAt",

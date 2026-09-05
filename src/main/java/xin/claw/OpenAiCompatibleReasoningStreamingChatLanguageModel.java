@@ -34,7 +34,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.concurrent.ConcurrentHashMap;
+
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.TimeUnit;
@@ -51,6 +51,7 @@ import xin.claw.trace.AgentTracePublisher;
 final class OpenAiCompatibleReasoningStreamingChatLanguageModel implements StreamingChatLanguageModel {
     private static final Gson GSON = new Gson();
     private static final int MAX_RETRIES = 2;
+    static final int MAX_REASONING_ENTRIES = 256;
     private static final long RETRY_BASE_DELAY_MILLIS = 500L;
     private final String apiKey;
     private final URI endpoint;
@@ -58,7 +59,14 @@ final class OpenAiCompatibleReasoningStreamingChatLanguageModel implements Strea
     private final String reasoningEffort;
     private final AgentTracePublisher trace;
     private final HttpClient client;
-    private final Map<String, String> reasoningByMessage = new ConcurrentHashMap<>();
+    private final Map<String, String> reasoningByMessage = java.util.Collections.synchronizedMap(
+        new LinkedHashMap<>(MAX_REASONING_ENTRIES + 1, 0.75f, true) {
+            @Override
+            protected boolean removeEldestEntry(Map.Entry<String, String> eldest) {
+                return size() > MAX_REASONING_ENTRIES;
+            }
+        }
+    );
     private final java.util.concurrent.atomic.AtomicReference<UserMessage> latestUserMessage =
         new java.util.concurrent.atomic.AtomicReference<>();
 
@@ -266,7 +274,7 @@ final class OpenAiCompatibleReasoningStreamingChatLanguageModel implements Strea
         } else if (message instanceof AiMessage ai) {
             output.addProperty("role", "assistant");
             output.addProperty("content", ai.text() == null ? "" : ai.text());
-            String reasoning = reasoningByMessage.get(messageFingerprint(ai));
+            String reasoning = reasoningFor(ai);
             if (reasoning != null) output.addProperty("reasoning_content", reasoning);
             if (ai.hasToolExecutionRequests()) {
                 JsonArray calls = new JsonArray();
@@ -346,7 +354,7 @@ final class OpenAiCompatibleReasoningStreamingChatLanguageModel implements Strea
         }
         AiMessage message = state.toMessage();
         String reasoning = state.reasoning.toString();
-        reasoningByMessage.put(messageFingerprint(message), reasoning);
+        rememberReasoning(message, reasoning);
         JsonObject responseTrace = state.tracePayload(message, reasoning);
         trace.emit("model_response", responseTrace);
         if (terminal.compareAndSet(false, true)) {
@@ -417,16 +425,36 @@ final class OpenAiCompatibleReasoningStreamingChatLanguageModel implements Strea
         if (terminal.compareAndSet(false, true)) handler.onError(error);
     }
 
-    private static String messageFingerprint(AiMessage message) {
-        StringBuilder key = new StringBuilder(message.text() == null ? "" : message.text());
+    static String messageFingerprint(AiMessage message) {
+        StringBuilder raw = new StringBuilder(message.text() == null ? "" : message.text());
         if (message.hasToolExecutionRequests()) {
             for (ToolExecutionRequest request : message.toolExecutionRequests()) {
-                key.append('\u0000').append(request.id())
+                raw.append('\u0000').append(request.id())
                     .append('\u0000').append(request.name())
                     .append('\u0000').append(request.arguments());
             }
         }
-        return key.toString();
+        try {
+            byte[] digest = java.security.MessageDigest.getInstance("SHA-256")
+                .digest(raw.toString().getBytes(StandardCharsets.UTF_8));
+            return java.util.HexFormat.of().formatHex(digest);
+        } catch (java.security.NoSuchAlgorithmException impossible) {
+            throw new IllegalStateException("SHA-256 is unavailable", impossible);
+        }
+    }
+
+    void rememberReasoning(AiMessage message, String reasoning) {
+        reasoningByMessage.put(messageFingerprint(message), reasoning);
+    }
+
+    String reasoningFor(AiMessage message) {
+        return reasoningByMessage.get(messageFingerprint(message));
+    }
+
+    int reasoningCacheSize() {
+        synchronized (reasoningByMessage) {
+            return reasoningByMessage.size();
+        }
     }
 
     private static String normalizeBaseUrl(String baseUrl) {
