@@ -4,8 +4,10 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.function.Consumer;
+import java.util.function.BooleanSupplier;
 import java.util.function.IntFunction;
 import java.util.function.IntSupplier;
+import java.util.function.Supplier;
 import org.geysermc.mcprotocollib.protocol.data.game.item.ItemStack;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.ClientboundTakeItemEntityPacket;
 import org.slf4j.Logger;
@@ -13,6 +15,8 @@ import org.slf4j.LoggerFactory;
 import xin.bbtt.MovementSync;
 import xin.bbtt.mcbot.event.EventHandler;
 import xin.bbtt.mcbot.event.Listener;
+import xin.bbtt.mcbot.events.DisablePluginEvent;
+import xin.bbtt.mcbot.events.DisconnectEvent;
 import xin.bbtt.mcbot.events.ReceivePacketEvent;
 import xin.claw.XinClawPlugin;
 import xin.claw.utils.ItemStateParser;
@@ -23,11 +27,18 @@ public final class ItemPickupListener implements Listener {
     private final IntSupplier botEntityId;
     private final IntFunction<String> itemNameResolver;
     private final Consumer<Runnable> asyncSubmit;
-    private final Consumer<String> agentNotify;
+    private final BooleanSupplier agentBusy;
+    private final DeferredAgentNotify agentNotify;
     private final long batchMillis;
     private final Object lock = new Object();
     private final LinkedHashMap<String, Integer> pending = new LinkedHashMap<>();
     private boolean flushScheduled;
+    private long generation;
+
+    @FunctionalInterface
+    interface DeferredAgentNotify {
+        boolean tryNotify(Supplier<String> message, Consumer<String> onReply);
+    }
 
     public ItemPickupListener() {
         this(
@@ -39,12 +50,16 @@ public final class ItemPickupListener implements Listener {
                     plugin.executorService.submit(task);
                 }
             },
-            message -> {
+            () -> {
+                XinClawPlugin plugin = XinClawPlugin.INSTANCE;
+                return plugin != null && plugin.agentManager != null && plugin.agentManager.isProcessing();
+            },
+            (message, onReply) -> {
                 XinClawPlugin plugin = XinClawPlugin.INSTANCE;
                 if (plugin != null && plugin.agentManager != null) {
-                    plugin.agentManager.submitMessage(message, null,
-                        response -> logger.info("[Item Pickup] AI 思考结果: {}", response));
+                    return plugin.agentManager.tryProcessDeferredMessage(message, onReply);
                 }
+                return false;
             },
             DEFAULT_BATCH_MILLIS
         );
@@ -54,11 +69,13 @@ public final class ItemPickupListener implements Listener {
             IntSupplier botEntityId,
             IntFunction<String> itemNameResolver,
             Consumer<Runnable> asyncSubmit,
-            Consumer<String> agentNotify,
+            BooleanSupplier agentBusy,
+            DeferredAgentNotify agentNotify,
             long batchMillis) {
         this.botEntityId = Objects.requireNonNull(botEntityId, "botEntityId");
         this.itemNameResolver = Objects.requireNonNull(itemNameResolver, "itemNameResolver");
         this.asyncSubmit = Objects.requireNonNull(asyncSubmit, "asyncSubmit");
+        this.agentBusy = Objects.requireNonNull(agentBusy, "agentBusy");
         this.agentNotify = Objects.requireNonNull(agentNotify, "agentNotify");
         if (batchMillis < 0) throw new IllegalArgumentException("batchMillis must be non-negative");
         this.batchMillis = batchMillis;
@@ -74,49 +91,89 @@ public final class ItemPickupListener implements Listener {
         );
     }
 
+    @EventHandler
+    public void onDisconnect(DisconnectEvent event) {
+        clearPending();
+    }
+
+    @EventHandler
+    public void onPluginDisable(DisablePluginEvent event) {
+        if (event.getPlugin() == XinClawPlugin.INSTANCE) clearPending();
+    }
+
     void handlePickup(int collectorEntityId, int collectedEntityId, int itemCount) {
         if (collectorEntityId != botEntityId.getAsInt() || itemCount <= 0) return;
         String itemName = itemNameResolver.apply(collectedEntityId);
         if (itemName == null || itemName.isBlank()) itemName = "unknown_item_entity_" + collectedEntityId;
+        long scheduledGeneration;
         synchronized (lock) {
             pending.merge(itemName, itemCount, Integer::sum);
-            if (flushScheduled) return;
+            if (flushScheduled || agentBusy.getAsBoolean()) return;
             flushScheduled = true;
+            scheduledGeneration = generation;
         }
+        scheduleFlush(true, scheduledGeneration);
+    }
+
+    public void onProcessingAvailable() {
+        long scheduledGeneration;
+        synchronized (lock) {
+            if (pending.isEmpty() || flushScheduled || agentBusy.getAsBoolean()) return;
+            flushScheduled = true;
+            scheduledGeneration = generation;
+        }
+        scheduleFlush(false, scheduledGeneration);
+    }
+
+    public void clearPending() {
+        synchronized (lock) {
+            pending.clear();
+            flushScheduled = false;
+            generation++;
+        }
+    }
+
+    private void scheduleFlush(boolean debounce, long scheduledGeneration) {
         try {
-            asyncSubmit.accept(this::flushAfterDelay);
+            asyncSubmit.accept(() -> flush(debounce, scheduledGeneration));
         } catch (RuntimeException error) {
             synchronized (lock) {
-                flushScheduled = false;
+                if (generation == scheduledGeneration) flushScheduled = false;
             }
             logger.warn("Failed to schedule item-pickup Agent notification", error);
         }
     }
 
-    private void flushAfterDelay() {
+    private void flush(boolean debounce, long scheduledGeneration) {
         try {
-            if (batchMillis > 0) Thread.sleep(batchMillis);
+            if (debounce && batchMillis > 0) Thread.sleep(batchMillis);
         } catch (InterruptedException error) {
             Thread.currentThread().interrupt();
             synchronized (lock) {
-                flushScheduled = false;
+                if (generation == scheduledGeneration) flushScheduled = false;
             }
             return;
         }
-        Map<String, Integer> batch;
         synchronized (lock) {
-            batch = new LinkedHashMap<>(pending);
-            pending.clear();
+            if (generation != scheduledGeneration) return;
             flushScheduled = false;
         }
-        if (batch.isEmpty()) return;
+        agentNotify.tryNotify(() -> drainMessage(scheduledGeneration),
+            response -> logger.info("[Item Pickup] AI 思考结果: {}", response));
+    }
+
+    private String drainMessage(long scheduledGeneration) {
+        Map<String, Integer> batch;
+        synchronized (lock) {
+            if (generation != scheduledGeneration || pending.isEmpty()) return null;
+            batch = new LinkedHashMap<>(pending);
+            pending.clear();
+        }
         String items = batch.entrySet().stream()
             .map(entry -> entry.getKey() + " x" + entry.getValue())
             .collect(java.util.stream.Collectors.joining(", "));
-        agentNotify.accept(
-            "[SYSTEM_EVENT] 你刚刚捡起物品: " + items + "。"
-            + "请结合当前任务判断是否需要检查物品栏、切换装备或继续原动作。"
-        );
+        return "[SYSTEM_EVENT] 你刚刚捡起物品: " + items + "。"
+            + "请结合当前任务判断是否需要检查物品栏、切换装备或继续原动作。";
     }
 
     private static String resolveItemName(int collectedEntityId) {

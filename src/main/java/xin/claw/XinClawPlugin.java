@@ -31,6 +31,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.List;
 import xin.claw.listeners.PrivateMessageListener;
+import xin.claw.listeners.ItemPickupListener;
 import xin.claw.trackers.DimensionTracker;
 import xin.claw.trackers.InventoryTracker;
 import xin.claw.tasks.Task;
@@ -48,6 +49,7 @@ public class XinClawPlugin implements Plugin {
     public ExecutorService executorService;
     private ScheduledExecutorService scheduler;
     private volatile boolean teleportAgentNotificationsSuppressed;
+    private ItemPickupListener itemPickupListener;
     
     // 用于将任务系统与寻路系统融合
     public String currentMovementTaskId = null;
@@ -75,6 +77,7 @@ public class XinClawPlugin implements Plugin {
     @Override
     public void onUnload() {
         logger.info("Unloading XinClawPlugin...");
+        clearPickupNotifications();
     }
 
     @Override
@@ -115,7 +118,9 @@ public class XinClawPlugin implements Plugin {
             Bot.INSTANCE.getPluginManager().events().registerEvents(new xin.claw.listeners.DeathListener(), this);
             logger.info("DeathListener initialized.");
 
-            Bot.INSTANCE.getPluginManager().events().registerEvents(new xin.claw.listeners.ItemPickupListener(), this);
+            itemPickupListener = new ItemPickupListener();
+            agentManager.setDeferredProcessingCheck(itemPickupListener::onProcessingAvailable);
+            Bot.INSTANCE.getPluginManager().events().registerEvents(itemPickupListener, this);
             logger.info("ItemPickupListener initialized.");
 
             // 启动自主任务循环（间隔可通过 task_loop_interval_seconds 配置）
@@ -269,6 +274,7 @@ public class XinClawPlugin implements Plugin {
     @Override
     public void onDisable() {
         logger.info("Disabling XinClawPlugin.");
+        clearPickupNotifications();
         if (scheduler != null) {
             scheduler.shutdownNow();
         }
@@ -282,5 +288,10 @@ public class XinClawPlugin implements Plugin {
                 executorService.shutdownNow();
             }
         }
+    }
+
+    private void clearPickupNotifications() {
+        if (agentManager != null) agentManager.setDeferredProcessingCheck(null);
+        if (itemPickupListener != null) itemPickupListener.clearPending();
     }
 }
