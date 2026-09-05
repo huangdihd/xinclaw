@@ -31,11 +31,11 @@
             <scope>provided</scope>
         </dependency>
 
-        <!-- Pinned companion MovementSync PR build; resolvable from JitPack in a clean checkout. -->
+        <!-- MovementSync from the published GitHub release via JitPack -->
         <dependency>
             <groupId>com.github.huangdihd</groupId>
             <artifactId>MovementSync</artifactId>
-            <version>03e85b6b33485cdaabfc77c3b6e8911979a2990d</version>
+            <version>1.9.0-RELEASE</version>
             <scope>provided</scope>
         </dependency>
 

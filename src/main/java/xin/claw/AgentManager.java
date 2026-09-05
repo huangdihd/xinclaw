@@ -23,7 +23,6 @@ import dev.langchain4j.memory.chat.MessageWindowChatMemory;
 import dev.langchain4j.model.chat.StreamingChatLanguageModel;
 import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
 import dev.langchain4j.service.AiServices;
-import dev.langchain4j.service.SystemMessage;
 import dev.langchain4j.service.TokenStream;
 import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
@@ -52,8 +51,7 @@ public class AgentManager {
         "^let me\\s+(?:find|locate|enter|navigate|move|go|build|mine|collect|search|scan|check|open|craft|place|dig|attack|follow|walk|travel|show|list|get|stop|use)\\b.*"
     );
     
-    public interface BotAgent {
-        @SystemMessage({
+    private static final String BUILT_IN_SYSTEM_PROMPT = String.join("\n", new String[] {
             "你是一个运行在 2b2t（著名的无政府服务器）中的高级智能机器人助理，代号 xinclaw。",
             "【核心能力：任务系统】",
             "1. 你拥有一个持久化的任务列表系统，用于管理长期和短期目标。",
@@ -77,11 +75,13 @@ public class AgentManager {
             "- 复杂任务应在同一轮直接调用 addTask，并立即使用返回的真实 ID 推进首个任务或调用完成当前步骤所需的感知/搜索/移动工具。",
             "- 纯聊天、解释或报告任务除外；只有这类不需要改变或读取游戏状态的请求可以不调用工具。",
             "【行为准则与安全要求】",
-            "- 绝对保密：2b2t 中坐标泄露极其危险！绝对不能在公共聊天频道或以任何形式对外透露你的当前坐标（x,y,z）！",
+            "- 公屏坐标保护：sendChatMessage 及公开输出指令会拦截配置保护范围内的 XYZ 或 X/Z 坐标；禁止尝试改写格式绕过。",
             "- 优先确保生存：随时可以用 getVitals 查询自己的血量和饥饿值。如果血量过低，应优先执行避险任务；当血量骤降时系统也会主动用 [SYSTEM_EVENT] 提醒你。",
             "- 保持进度透明：每当完成一个关键阶段或任务时，主动告知玩家。",
             "- 说话简洁、专业且富有逻辑。"
-        })
+        });
+
+    public interface BotAgent {
         TokenStream chat(String message);
     }
 
@@ -130,9 +130,17 @@ public class AgentManager {
 
         this.agent = AiServices.builder(BotAgent.class)
                 .streamingChatLanguageModel(model)
+                .systemMessageProvider(ignored -> configuredSystemPrompt())
                 .chatMemory(chatMemory)
                 .tools(toolRegistry.snapshot().toArray())
                 .build();
+    }
+
+    public static String configuredSystemPrompt() {
+        String custom = PluginConfig.soul == null ? "" : PluginConfig.soul.trim();
+        return custom.isEmpty()
+            ? BUILT_IN_SYSTEM_PROMPT
+            : BUILT_IN_SYSTEM_PROMPT + "\n【自定义 Soul】\n" + custom;
     }
 
     static StreamingChatLanguageModel buildStreamingModel() {
@@ -140,17 +148,14 @@ public class AgentManager {
     }
 
     static StreamingChatLanguageModel buildStreamingModel(AgentTracePublisher tracePublisher) {
-        boolean deepSeekModel = PluginConfig.modelName != null
-            && PluginConfig.modelName.toLowerCase(java.util.Locale.ROOT).contains("deepseek");
-        if (PluginConfig.enableThinking || deepSeekModel) {
+        if (!"none".equals(PluginConfig.reasoningEffort)) {
             return new SingleTerminalStreamingChatLanguageModel(
-                new DeepSeekThinkingStreamingChatLanguageModel(
+                new OpenAiCompatibleReasoningStreamingChatLanguageModel(
                     PluginConfig.apiKey,
                     PluginConfig.apiBaseUrl,
                     PluginConfig.modelName,
                     configuredApiTimeout(),
-                    PluginConfig.enableThinking,
-                    "high",
+                    PluginConfig.reasoningEffort,
                     tracePublisher
                 )
             );

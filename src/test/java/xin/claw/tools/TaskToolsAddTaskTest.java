@@ -3,7 +3,7 @@ package xin.claw.tools;
 import static org.junit.jupiter.api.Assertions.*;
 
 import dev.langchain4j.agent.tool.Tool;
-import dev.langchain4j.service.SystemMessage;
+
 import java.nio.file.Path;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -31,10 +31,7 @@ final class TaskToolsAddTaskTest {
         assertTrue(String.join("\n", annotation.value()).contains("返回"));
         assertTrue(String.join("\n", annotation.value()).contains("ID"));
 
-        SystemMessage system = AgentManager.BotAgent.class
-            .getMethod("chat", String.class)
-            .getAnnotation(SystemMessage.class);
-        String prompt = String.join("\n", system.value());
+        String prompt = AgentManager.configuredSystemPrompt();
         assertTrue(prompt.contains("addTask 返回"), prompt);
         assertTrue(prompt.contains("禁止猜测"), prompt);
     }

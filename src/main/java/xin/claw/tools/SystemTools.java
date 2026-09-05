@@ -22,11 +22,54 @@ import dev.langchain4j.agent.tool.Tool;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import xin.bbtt.mcbot.Bot;
+import xin.claw.CoordinateRange;
+import xin.claw.PluginConfig;
 
 import java.nio.charset.StandardCharsets;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class SystemTools {
     private static final Logger logger = LoggerFactory.getLogger(SystemTools.class);
+    private static final String NUMBER =
+        "[-+]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:[eE][-+]?\\d+)?";
+    private static final Pattern LABELED_COMPONENT = Pattern.compile(
+        "(?i)\\b([xyz])(?:\\s*[:=]\\s*|\\s+)(" + NUMBER + ")"
+    );
+    private static final Pattern TUPLE_COORDINATES = Pattern.compile(
+        "(?<![\\w.])\\(?\\s*(" + NUMBER + ")\\s*[,;/]\\s*"
+            + "(" + NUMBER + ")\\s*[,;/]\\s*(" + NUMBER + ")\\s*\\)?"
+    );
+    private static final Pattern BARE_COORDINATES = Pattern.compile(
+        "^\\s*(" + NUMBER + ")\\s+(" + NUMBER + ")\\s+(" + NUMBER + ")\\s*$"
+    );
+    private static final Pattern HORIZONTAL_PAIR = Pattern.compile(
+        "(?<![\\w.])\\(?\\s*(" + NUMBER + ")\\s*[,;/]\\s*"
+            + "(" + NUMBER + ")\\s*\\)?"
+    );
+    private static final Pattern BARE_HORIZONTAL_PAIR = Pattern.compile(
+        "^\\s*(" + NUMBER + ")\\s+(" + NUMBER + ")\\s*$"
+    );
+    private static final String COORDINATE_CUE =
+        "(?:coords?|coordinates?|base|location|meet\\s+at|go\\s+to|i\\s+am\\s+at|i['’]?m\\s+at|at|坐标|位置|位于|我在|前往|去|到)";
+    private static final Pattern CUE_COORDINATES = Pattern.compile(
+        "(?i)" + COORDINATE_CUE + "\\D{0,24}(" + NUMBER + ")\\s+"
+            + "(" + NUMBER + ")\\s+(" + NUMBER + ")"
+    );
+    private static final Pattern CUE_HORIZONTAL_PAIR = Pattern.compile(
+        "(?i)" + COORDINATE_CUE + "\\D{0,24}(" + NUMBER + ")\\s+(" + NUMBER + ")"
+    );
+    private static final Pattern PUBLIC_CHAT_COMMAND = Pattern.compile(
+        "(?i)(?:^|\\brun\\s+)(?:minecraft:)?(?:say|me|tellraw)\\s+"
+    );
+    private static final Pattern PUBLIC_COMMAND_COORDINATES = Pattern.compile(
+        "(?<![\\w.])(" + NUMBER + ")[\\s,;/]+(" + NUMBER + ")"
+            + "[\\s,;/]+(" + NUMBER + ")"
+    );
+    private static final Pattern PUBLIC_COMMAND_HORIZONTAL_PAIR = Pattern.compile(
+        "(?<![\\w.])(" + NUMBER + ")[\\s,;/]+(" + NUMBER + ")"
+    );
+    private static final Pattern NUMBER_TOKEN = Pattern.compile(NUMBER);
     private final boolean commandExecutionEnabled;
 
     public SystemTools() {
@@ -40,16 +83,88 @@ public class SystemTools {
     @Tool("在游戏内发送聊天消息。这将被服务器内的所有人看到。")
     public String sendChatMessage(@P("你要发送的文本内容") String message) {
         logger.info("[AI Tool Call] 调用了 sendChatMessage(message='{}')", message);
-        if (Bot.INSTANCE == null) return "Bot实例未初始化。";
-        
-        // 检测疑似坐标泄露 (包含连续或相近的数字组合，特别是带有负号或小数的)
-        if (message.matches(".*?-?\\d{2,}[\\s,]+-?\\d{1,}[\\s,]+-?\\d{2,}.*")) {
-            logger.warn("检测到可能泄露坐标的消息，已拦截: {}", message);
-            return "发送失败：系统检测到消息中包含疑似坐标信息。2b2t严禁泄露坐标，请修改你的消息！";
+        if (containsForbiddenCoordinates(message, PluginConfig.publicChatForbiddenCoordinateRange)) {
+            logger.warn("检测到受保护坐标范围内的位置，已拦截公屏消息。");
+            return "发送失败：消息包含配置为禁止公开的坐标范围。";
         }
+        if (Bot.INSTANCE == null) return "Bot实例未初始化。";
         
         sendChatMessageInChunks(message);
         return "消息已成功分段发送至游戏内聊天框。";
+    }
+
+    static boolean containsForbiddenCoordinates(String message, CoordinateRange range) {
+        if (message == null || range == null) return false;
+        return containsLabeledCoordinates(message, range)
+            || containsCoordinateInRange(TUPLE_COORDINATES.matcher(message), range)
+            || containsCoordinateInRange(BARE_COORDINATES.matcher(message), range)
+            || containsCoordinateInRange(CUE_COORDINATES.matcher(message), range)
+            || containsHorizontalCoordinateInRange(HORIZONTAL_PAIR.matcher(message), range)
+            || containsHorizontalCoordinateInRange(BARE_HORIZONTAL_PAIR.matcher(message), range)
+            || containsHorizontalCoordinateInRange(CUE_HORIZONTAL_PAIR.matcher(message), range);
+    }
+
+    private static boolean containsLabeledCoordinates(String message, CoordinateRange range) {
+        Matcher matcher = LABELED_COMPONENT.matcher(message);
+        java.util.List<Double> xs = new java.util.ArrayList<>();
+        java.util.List<Double> ys = new java.util.ArrayList<>();
+        java.util.List<Double> zs = new java.util.ArrayList<>();
+        while (matcher.find()) {
+            double value;
+            try {
+                value = Double.parseDouble(matcher.group(2));
+            } catch (NumberFormatException ignored) {
+                continue;
+            }
+            switch (matcher.group(1).toLowerCase(java.util.Locale.ROOT)) {
+                case "x" -> xs.add(value);
+                case "y" -> ys.add(value);
+                case "z" -> zs.add(value);
+                default -> { }
+            }
+        }
+        if (xs.isEmpty() || zs.isEmpty()) return false;
+        for (double x : xs) {
+            for (double z : zs) {
+                if (ys.isEmpty()) {
+                    if (range.containsHorizontal(x, z)) return true;
+                } else {
+                    for (double y : ys) {
+                        if (range.contains(x, y, z)) return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    private static boolean containsCoordinateInRange(Matcher matcher, CoordinateRange range) {
+        while (matcher.find()) {
+            try {
+                double x = Double.parseDouble(matcher.group(1));
+                double y = Double.parseDouble(matcher.group(2));
+                double z = Double.parseDouble(matcher.group(3));
+                if (range.contains(x, y, z)) return true;
+            } catch (NumberFormatException ignored) {
+                // The regex accepts only decimal numbers; keep scanning if a
+                // value still exceeds Double's parser limits.
+            }
+        }
+        return false;
+    }
+
+    private static boolean containsHorizontalCoordinateInRange(
+            Matcher matcher, CoordinateRange range) {
+        while (matcher.find()) {
+            try {
+                double x = Double.parseDouble(matcher.group(1));
+                double z = Double.parseDouble(matcher.group(2));
+                if (range.containsHorizontal(x, z)) return true;
+            } catch (NumberFormatException ignored) {
+                // Keep scanning if a decimal still exceeds Double's parser limits.
+            }
+        }
+        return false;
     }
 
     private void sendChatMessageInChunks(String text) {
@@ -89,6 +204,12 @@ public class SystemTools {
         if (!commandExecutionEnabled) {
             return "Command execution is disabled for this benchmark.";
         }
+        String publicText = publicChatCommandText(command);
+        if (containsForbiddenCoordinatesInPublicCommand(
+                publicText, PluginConfig.publicChatForbiddenCoordinateRange)) {
+            logger.warn("检测到受保护坐标范围内的位置，已拦截公屏指令。");
+            return "执行失败：公屏指令包含配置为禁止公开的坐标范围。";
+        }
         if (Bot.INSTANCE == null) return "Bot实例未初始化。";
         
         if (command.startsWith("tell ") || command.startsWith("msg ") || command.startsWith("w ")) {
@@ -104,6 +225,46 @@ public class SystemTools {
         
         Bot.INSTANCE.sendCommand(command);
         return "指令执行请求已发送。";
+    }
+
+    private static String publicChatCommandText(String command) {
+        if (command == null) return null;
+        String trimmed = command.stripLeading();
+        if (trimmed.startsWith("/")) trimmed = trimmed.substring(1).stripLeading();
+        Matcher matcher = PUBLIC_CHAT_COMMAND.matcher(trimmed);
+        return matcher.find() ? trimmed.substring(matcher.end()) : null;
+    }
+
+    private static boolean containsForbiddenCoordinatesInPublicCommand(
+            String publicText, CoordinateRange range) {
+        if (containsForbiddenCoordinates(publicText, range)) return true;
+        if (publicText == null || range == null) return false;
+        return containsCoordinateInRange(PUBLIC_COMMAND_COORDINATES.matcher(publicText), range)
+            || containsHorizontalCoordinateInRange(
+                PUBLIC_COMMAND_HORIZONTAL_PAIR.matcher(publicText), range)
+            || containsAnyPublicNumberPairInRange(publicText, range);
+    }
+
+    private static boolean containsAnyPublicNumberPairInRange(
+            String publicText, CoordinateRange range) {
+        java.util.List<Double> numbers = new java.util.ArrayList<>();
+        Matcher matcher = NUMBER_TOKEN.matcher(publicText);
+        while (matcher.find()) {
+            try {
+                numbers.add(Double.parseDouble(matcher.group()));
+            } catch (NumberFormatException ignored) {
+                // Skip numbers outside Double's parser range.
+            }
+        }
+        for (int i = 0; i < numbers.size(); i++) {
+            for (int j = i + 1; j < numbers.size(); j++) {
+                double first = numbers.get(i);
+                double second = numbers.get(j);
+                if (range.containsHorizontal(first, second)
+                        || range.containsHorizontal(second, first)) return true;
+            }
+        }
+        return false;
     }
 
     private void sendTellInChunks(String cmdType, String recipient, String text) {

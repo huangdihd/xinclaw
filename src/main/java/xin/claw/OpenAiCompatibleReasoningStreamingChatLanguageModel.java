@@ -46,9 +46,9 @@ import xin.claw.trace.AgentTracePublisher;
  *
  * LangChain4j 0.35 discards that provider extension. This adapter keeps it
  * in a sidecar keyed by the exact assistant message and replays it on later
- * tool-aware requests as required by the DeepSeek thinking-mode protocol.
+ * tool-aware requests for OpenAI-compatible reasoning protocols.
  */
-final class DeepSeekThinkingStreamingChatLanguageModel implements StreamingChatLanguageModel {
+final class OpenAiCompatibleReasoningStreamingChatLanguageModel implements StreamingChatLanguageModel {
     private static final Gson GSON = new Gson();
     private static final int MAX_RETRIES = 2;
     static final int MAX_REASONING_ENTRIES = 256;
@@ -56,7 +56,6 @@ final class DeepSeekThinkingStreamingChatLanguageModel implements StreamingChatL
     private final String apiKey;
     private final URI endpoint;
     private final String modelName;
-    private final boolean thinkingEnabled;
     private final String reasoningEffort;
     private final AgentTracePublisher trace;
     private final HttpClient client;
@@ -71,20 +70,18 @@ final class DeepSeekThinkingStreamingChatLanguageModel implements StreamingChatL
     private final java.util.concurrent.atomic.AtomicReference<UserMessage> latestUserMessage =
         new java.util.concurrent.atomic.AtomicReference<>();
 
-    DeepSeekThinkingStreamingChatLanguageModel(
+    OpenAiCompatibleReasoningStreamingChatLanguageModel(
         String apiKey,
         String baseUrl,
         String modelName,
         Duration timeout,
-        boolean thinkingEnabled,
         String reasoningEffort,
         AgentTracePublisher trace
     ) {
         this.apiKey = Objects.requireNonNull(apiKey, "apiKey");
         this.endpoint = URI.create(normalizeBaseUrl(baseUrl) + "/chat/completions");
         this.modelName = Objects.requireNonNull(modelName, "modelName");
-        this.thinkingEnabled = thinkingEnabled;
-        this.reasoningEffort = reasoningEffort == null || reasoningEffort.isBlank() ? "high" : reasoningEffort;
+        this.reasoningEffort = PluginConfig.normalizeReasoningEffort(reasoningEffort);
         this.trace = Objects.requireNonNull(trace, "trace");
         this.client = HttpClient.newBuilder()
             .connectTimeout(Objects.requireNonNull(timeout, "timeout"))
@@ -117,7 +114,6 @@ final class DeepSeekThinkingStreamingChatLanguageModel implements StreamingChatL
         JsonObject requestBody = requestBody(messages, tools);
         JsonObject traceRequest = new JsonObject();
         traceRequest.addProperty("model", modelName);
-        traceRequest.addProperty("thinking_enabled", thinkingEnabled);
         traceRequest.addProperty("reasoning_effort", reasoningEffort);
         traceRequest.add("request", requestBody.deepCopy());
         trace.emit("model_request", traceRequest);
@@ -150,7 +146,7 @@ final class DeepSeekThinkingStreamingChatLanguageModel implements StreamingChatL
                         return;
                     }
                     fail(handler, terminal, new IllegalStateException(
-                        "DeepSeek HTTP " + response.statusCode() + ": " + body
+                        "Model API HTTP " + response.statusCode() + ": " + body
                     ));
                     return;
                 }
@@ -204,7 +200,6 @@ final class DeepSeekThinkingStreamingChatLanguageModel implements StreamingChatL
         trace.emit("model_retry", retry);
         JsonObject retriedRequest = new JsonObject();
         retriedRequest.addProperty("model", modelName);
-        retriedRequest.addProperty("thinking_enabled", thinkingEnabled);
         retriedRequest.addProperty("reasoning_effort", reasoningEffort);
         retriedRequest.addProperty("retry_attempt", nextAttempt);
         retriedRequest.addProperty("retry_reason", reason);
@@ -237,15 +232,8 @@ final class DeepSeekThinkingStreamingChatLanguageModel implements StreamingChatL
         JsonObject streamOptions = new JsonObject();
         streamOptions.addProperty("include_usage", true);
         payload.add("stream_options", streamOptions);
-        if (thinkingEnabled) {
-            JsonObject thinking = new JsonObject();
-            thinking.addProperty("type", "enabled");
-            payload.add("thinking", thinking);
+        if (!"none".equals(reasoningEffort)) {
             payload.addProperty("reasoning_effort", reasoningEffort);
-        } else {
-            JsonObject thinking = new JsonObject();
-            thinking.addProperty("type", "disabled");
-            payload.add("thinking", thinking);
         }
         UserMessage newestUser = null;
         for (ChatMessage message : messages) {
@@ -279,7 +267,7 @@ final class DeepSeekThinkingStreamingChatLanguageModel implements StreamingChatL
             output.addProperty("role", "system");
             output.addProperty("content", system.text());
         } else if (message instanceof UserMessage user) {
-            if (!user.hasSingleText()) throw new IllegalArgumentException("DeepSeek benchmark supports text-only user messages");
+            if (!user.hasSingleText()) throw new IllegalArgumentException("OpenAI-compatible adapter supports text-only user messages");
             output.addProperty("role", "user");
             output.addProperty("content", user.singleText());
             if (user.name() != null && !user.name().isBlank()) output.addProperty("name", user.name());
@@ -495,7 +483,7 @@ final class DeepSeekThinkingStreamingChatLanguageModel implements StreamingChatL
         private final String finishReason;
 
         private EmptyModelResponseException(String responseId, int reasoningChars, String finishReason) {
-            super("DeepSeek returned reasoning but no assistant content or tool calls");
+            super("Model returned reasoning but no assistant content or tool calls");
             this.responseId = responseId;
             this.reasoningChars = reasoningChars;
             this.finishReason = finishReason;

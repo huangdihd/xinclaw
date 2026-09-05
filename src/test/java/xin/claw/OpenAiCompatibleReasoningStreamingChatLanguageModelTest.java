@@ -33,7 +33,7 @@ import org.junit.jupiter.api.Test;
 import xin.claw.trace.AgentTraceEvent;
 import xin.claw.trace.AgentTracePublisher;
 
-final class DeepSeekThinkingStreamingChatLanguageModelTest {
+final class OpenAiCompatibleReasoningStreamingChatLanguageModelTest {
     private HttpServer server;
     private String baseUrl;
     private final AtomicInteger requestCount = new AtomicInteger();
@@ -75,7 +75,7 @@ final class DeepSeekThinkingStreamingChatLanguageModelTest {
     @Test
     void reasoningFingerprintHasFixedSizeAndDoesNotRetainMessageText() {
         String sensitiveText = "large-sensitive-response-" + "x".repeat(10_000);
-        String fingerprint = DeepSeekThinkingStreamingChatLanguageModel.messageFingerprint(
+        String fingerprint = OpenAiCompatibleReasoningStreamingChatLanguageModel.messageFingerprint(
             AiMessage.from(sensitiveText));
 
         assertEquals(64, fingerprint.length());
@@ -84,17 +84,17 @@ final class DeepSeekThinkingStreamingChatLanguageModelTest {
 
     @Test
     void reasoningSidecarEvictsLeastRecentlyUsedMessages() {
-        DeepSeekThinkingStreamingChatLanguageModel model = new DeepSeekThinkingStreamingChatLanguageModel(
-            "secret", baseUrl, "deepseek/deepseek-v4-pro", Duration.ofSeconds(5), true, "high",
+        OpenAiCompatibleReasoningStreamingChatLanguageModel model = new OpenAiCompatibleReasoningStreamingChatLanguageModel(
+            "secret", baseUrl, "reasoning-model-v4", Duration.ofSeconds(5), "high",
             new AgentTracePublisher(System::nanoTime)
         );
         AiMessage first = AiMessage.from("message-0");
         model.rememberReasoning(first, "reasoning-0");
-        for (int index = 1; index <= DeepSeekThinkingStreamingChatLanguageModel.MAX_REASONING_ENTRIES; index++) {
+        for (int index = 1; index <= OpenAiCompatibleReasoningStreamingChatLanguageModel.MAX_REASONING_ENTRIES; index++) {
             model.rememberReasoning(AiMessage.from("message-" + index), "reasoning-" + index);
         }
 
-        assertEquals(DeepSeekThinkingStreamingChatLanguageModel.MAX_REASONING_ENTRIES,
+        assertEquals(OpenAiCompatibleReasoningStreamingChatLanguageModel.MAX_REASONING_ENTRIES,
             model.reasoningCacheSize());
         assertNull(model.reasoningFor(first), "oldest reasoning entry must be evicted");
         assertEquals("reasoning-256", model.reasoningFor(AiMessage.from("message-256")));
@@ -105,8 +105,8 @@ final class DeepSeekThinkingStreamingChatLanguageModelTest {
         AgentTracePublisher publisher = new AgentTracePublisher(System::nanoTime);
         List<AgentTraceEvent> trace = new ArrayList<>();
         publisher.subscribe(trace::add);
-        DeepSeekThinkingStreamingChatLanguageModel model = new DeepSeekThinkingStreamingChatLanguageModel(
-            "secret", baseUrl, "deepseek/deepseek-v4-pro", Duration.ofSeconds(5), true, "high", publisher
+        OpenAiCompatibleReasoningStreamingChatLanguageModel model = new OpenAiCompatibleReasoningStreamingChatLanguageModel(
+            "secret", baseUrl, "reasoning-model-v4", Duration.ofSeconds(5), "high", publisher
         );
         ToolSpecification tool = ToolSpecification.builder().name("whereAmI").description("position").build();
 
@@ -133,7 +133,8 @@ final class DeepSeekThinkingStreamingChatLanguageModelTest {
         assertEquals("You are at the recorded position.", second.response.get().content().text());
 
         JsonObject firstPayload = requests.get(0);
-        assertEquals("enabled", firstPayload.getAsJsonObject("thinking").get("type").getAsString());
+        assertFalse(firstPayload.has("thinking"));
+        assertEquals("high", firstPayload.get("reasoning_effort").getAsString());
         assertTrue(firstPayload.get("stream").getAsBoolean());
         JsonObject replayedAssistant = requests.get(1).getAsJsonArray("messages").get(1).getAsJsonObject();
         assertEquals("Inspect the live position.", replayedAssistant.get("reasoning_content").getAsString());
@@ -150,8 +151,8 @@ final class DeepSeekThinkingStreamingChatLanguageModelTest {
         AgentTracePublisher publisher = new AgentTracePublisher(System::nanoTime);
         List<AgentTraceEvent> trace = new ArrayList<>();
         publisher.subscribe(trace::add);
-        DeepSeekThinkingStreamingChatLanguageModel model = new DeepSeekThinkingStreamingChatLanguageModel(
-            "secret", baseUrl, "deepseek/deepseek-v4-pro", Duration.ofSeconds(5), true, "high", publisher
+        OpenAiCompatibleReasoningStreamingChatLanguageModel model = new OpenAiCompatibleReasoningStreamingChatLanguageModel(
+            "secret", baseUrl, "reasoning-model-v4", Duration.ofSeconds(5), "high", publisher
         );
         ToolSpecification tool = ToolSpecification.builder().name("whereAmI").description("position").build();
         CapturingHandler handler = new CapturingHandler();
@@ -169,8 +170,8 @@ final class DeepSeekThinkingStreamingChatLanguageModelTest {
     void acceptsToolCallResponseWithNoVisibleAssistantContent() throws Exception {
         responseFactory.set(index -> toolCallOnlyStream());
         AgentTracePublisher publisher = new AgentTracePublisher(System::nanoTime);
-        DeepSeekThinkingStreamingChatLanguageModel model = new DeepSeekThinkingStreamingChatLanguageModel(
-            "secret", baseUrl, "deepseek/deepseek-v4-pro", Duration.ofSeconds(5), true, "high", publisher
+        OpenAiCompatibleReasoningStreamingChatLanguageModel model = new OpenAiCompatibleReasoningStreamingChatLanguageModel(
+            "secret", baseUrl, "reasoning-model-v4", Duration.ofSeconds(5), "high", publisher
         );
         ToolSpecification tool = ToolSpecification.builder().name("whereAmI").description("position").build();
         CapturingHandler handler = new CapturingHandler();
@@ -190,8 +191,8 @@ final class DeepSeekThinkingStreamingChatLanguageModelTest {
         AgentTracePublisher publisher = new AgentTracePublisher(System::nanoTime);
         List<AgentTraceEvent> trace = new ArrayList<>();
         publisher.subscribe(trace::add);
-        DeepSeekThinkingStreamingChatLanguageModel model = new DeepSeekThinkingStreamingChatLanguageModel(
-            "secret", baseUrl, "glm-5.3-flash", Duration.ofSeconds(5), true, "high", publisher
+        OpenAiCompatibleReasoningStreamingChatLanguageModel model = new OpenAiCompatibleReasoningStreamingChatLanguageModel(
+            "secret", baseUrl, "reasoning-model", Duration.ofSeconds(5), "high", publisher
         );
         CapturingHandler handler = new CapturingHandler();
 
@@ -213,8 +214,8 @@ final class DeepSeekThinkingStreamingChatLanguageModelTest {
         AgentTracePublisher publisher = new AgentTracePublisher(System::nanoTime);
         List<AgentTraceEvent> trace = new ArrayList<>();
         publisher.subscribe(trace::add);
-        DeepSeekThinkingStreamingChatLanguageModel model = new DeepSeekThinkingStreamingChatLanguageModel(
-            "secret", baseUrl, "glm-5.3-flash", Duration.ofSeconds(5), true, "high", publisher
+        OpenAiCompatibleReasoningStreamingChatLanguageModel model = new OpenAiCompatibleReasoningStreamingChatLanguageModel(
+            "secret", baseUrl, "reasoning-model", Duration.ofSeconds(5), "high", publisher
         );
         CapturingHandler handler = new CapturingHandler();
 
@@ -233,8 +234,8 @@ final class DeepSeekThinkingStreamingChatLanguageModelTest {
     void doesNotRetryPermanentHttp400() throws Exception {
         statusFactory.set(index -> 400);
         responseFactory.set(index -> "invalid messages");
-        DeepSeekThinkingStreamingChatLanguageModel model = new DeepSeekThinkingStreamingChatLanguageModel(
-            "secret", baseUrl, "glm-5.3-flash", Duration.ofSeconds(5), true, "high",
+        OpenAiCompatibleReasoningStreamingChatLanguageModel model = new OpenAiCompatibleReasoningStreamingChatLanguageModel(
+            "secret", baseUrl, "reasoning-model", Duration.ofSeconds(5), "high",
             new AgentTracePublisher(System::nanoTime)
         );
         CapturingHandler handler = new CapturingHandler();
@@ -251,8 +252,8 @@ final class DeepSeekThinkingStreamingChatLanguageModelTest {
         statusFactory.set(index -> requests.get(index - 1).getAsJsonArray("messages").asList().stream()
             .anyMatch(message -> message.getAsJsonObject().get("role").getAsString().equals("user")) ? 200 : 400);
         responseFactory.set(index -> finalAnswerStream());
-        DeepSeekThinkingStreamingChatLanguageModel model = new DeepSeekThinkingStreamingChatLanguageModel(
-            "secret", baseUrl, "glm-5.3-flash", Duration.ofSeconds(5), true, "high",
+        OpenAiCompatibleReasoningStreamingChatLanguageModel model = new OpenAiCompatibleReasoningStreamingChatLanguageModel(
+            "secret", baseUrl, "reasoning-model", Duration.ofSeconds(5), "high",
             new AgentTracePublisher(System::nanoTime)
         );
 
@@ -286,8 +287,8 @@ final class DeepSeekThinkingStreamingChatLanguageModelTest {
         AgentTracePublisher publisher = new AgentTracePublisher(System::nanoTime);
         List<AgentTraceEvent> trace = new ArrayList<>();
         publisher.subscribe(trace::add);
-        DeepSeekThinkingStreamingChatLanguageModel model = new DeepSeekThinkingStreamingChatLanguageModel(
-            "secret", baseUrl, "glm-5.3-flash", Duration.ofSeconds(5), true, "high", publisher
+        OpenAiCompatibleReasoningStreamingChatLanguageModel model = new OpenAiCompatibleReasoningStreamingChatLanguageModel(
+            "secret", baseUrl, "reasoning-model", Duration.ofSeconds(5), "high", publisher
         );
         CapturingHandler handler = new CapturingHandler();
 
@@ -301,39 +302,39 @@ final class DeepSeekThinkingStreamingChatLanguageModelTest {
 
     @Test
     void classifiesHttpTimeoutAsRetryableTransport() {
-        assertTrue(DeepSeekThinkingStreamingChatLanguageModel.isRetryableTransport(
+        assertTrue(OpenAiCompatibleReasoningStreamingChatLanguageModel.isRetryableTransport(
             new CompletionException(new HttpTimeoutException("timed out"))));
-        assertFalse(DeepSeekThinkingStreamingChatLanguageModel.isRetryableTransport(
+        assertFalse(OpenAiCompatibleReasoningStreamingChatLanguageModel.isRetryableTransport(
             new IllegalArgumentException("bad request")));
     }
 
     private static String firstToolCallStream() {
         return String.join("\n",
-            "data: {\"id\":\"r1\",\"model\":\"deepseek/deepseek-v4-pro\",\"choices\":[{\"delta\":{\"reasoning_content\":\"Inspect the \"}}]}",
-            "data: {\"id\":\"r1\",\"model\":\"deepseek/deepseek-v4-pro\",\"choices\":[{\"delta\":{\"reasoning_content\":\"live position.\"}}]}",
-            "data: {\"id\":\"r1\",\"model\":\"deepseek/deepseek-v4-pro\",\"choices\":[{\"delta\":{\"content\":\"I will inspect.\"}}]}",
-            "data: {\"id\":\"r1\",\"model\":\"deepseek/deepseek-v4-pro\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-1\",\"type\":\"function\",\"function\":{\"name\":\"whereAmI\",\"arguments\":\"{}\"}}]},\"finish_reason\":\"tool_calls\"}],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":8,\"total_tokens\":18}}",
+            "data: {\"id\":\"r1\",\"model\":\"reasoning-model-v4\",\"choices\":[{\"delta\":{\"reasoning_content\":\"Inspect the \"}}]}",
+            "data: {\"id\":\"r1\",\"model\":\"reasoning-model-v4\",\"choices\":[{\"delta\":{\"reasoning_content\":\"live position.\"}}]}",
+            "data: {\"id\":\"r1\",\"model\":\"reasoning-model-v4\",\"choices\":[{\"delta\":{\"content\":\"I will inspect.\"}}]}",
+            "data: {\"id\":\"r1\",\"model\":\"reasoning-model-v4\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-1\",\"type\":\"function\",\"function\":{\"name\":\"whereAmI\",\"arguments\":\"{}\"}}]},\"finish_reason\":\"tool_calls\"}],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":8,\"total_tokens\":18}}",
             "data: [DONE]", "");
     }
 
     private static String finalAnswerStream() {
         return String.join("\n",
-            "data: {\"id\":\"r2\",\"model\":\"deepseek/deepseek-v4-pro\",\"choices\":[{\"delta\":{\"reasoning_content\":\"Use the result.\"}}]}",
-            "data: {\"id\":\"r2\",\"model\":\"deepseek/deepseek-v4-pro\",\"choices\":[{\"delta\":{\"content\":\"You are at the recorded position.\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":20,\"completion_tokens\":9,\"total_tokens\":29}}",
+            "data: {\"id\":\"r2\",\"model\":\"reasoning-model-v4\",\"choices\":[{\"delta\":{\"reasoning_content\":\"Use the result.\"}}]}",
+            "data: {\"id\":\"r2\",\"model\":\"reasoning-model-v4\",\"choices\":[{\"delta\":{\"content\":\"You are at the recorded position.\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":20,\"completion_tokens\":9,\"total_tokens\":29}}",
             "data: [DONE]", "");
     }
 
     private static String reasoningOnlyStream() {
         return String.join("\n",
-            "data: {\"id\":\"empty-1\",\"model\":\"deepseek/deepseek-v4-pro\",\"choices\":[{\"delta\":{\"reasoning_content\":\"I should call a tool.\"}}]}",
-            "data: {\"id\":\"empty-1\",\"model\":\"deepseek/deepseek-v4-pro\",\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}",
+            "data: {\"id\":\"empty-1\",\"model\":\"reasoning-model-v4\",\"choices\":[{\"delta\":{\"reasoning_content\":\"I should call a tool.\"}}]}",
+            "data: {\"id\":\"empty-1\",\"model\":\"reasoning-model-v4\",\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}",
             "data: [DONE]", "");
     }
 
     private static String toolCallOnlyStream() {
         return String.join("\n",
-            "data: {\"id\":\"tool-only\",\"model\":\"deepseek/deepseek-v4-pro\",\"choices\":[{\"delta\":{\"reasoning_content\":\"Call the position tool.\"}}]}",
-            "data: {\"id\":\"tool-only\",\"model\":\"deepseek/deepseek-v4-pro\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-only\",\"type\":\"function\",\"function\":{\"name\":\"whereAmI\",\"arguments\":\"{}\"}}]},\"finish_reason\":\"tool_calls\"}]}",
+            "data: {\"id\":\"tool-only\",\"model\":\"reasoning-model-v4\",\"choices\":[{\"delta\":{\"reasoning_content\":\"Call the position tool.\"}}]}",
+            "data: {\"id\":\"tool-only\",\"model\":\"reasoning-model-v4\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-only\",\"type\":\"function\",\"function\":{\"name\":\"whereAmI\",\"arguments\":\"{}\"}}]},\"finish_reason\":\"tool_calls\"}]}",
             "data: [DONE]", "");
     }
 
