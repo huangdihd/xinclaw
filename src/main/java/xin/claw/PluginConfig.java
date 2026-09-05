@@ -27,11 +27,19 @@ import org.slf4j.LoggerFactory;
 
 public class PluginConfig {
     private static final Logger logger = LoggerFactory.getLogger(PluginConfig.class);
+    public static final String DEFAULT_PUBLIC_CHAT_FORBIDDEN_COORDINATE_RANGE =
+        "-30000000,-2048,-30000000,30000000,2048,30000000";
 
     public static String apiKey = "demo";
     public static String apiBaseUrl = "";
     public static String modelName = "gpt-4o-mini";
-    public static boolean enableThinking = false;
+    /** Supported values: none, low, medium, high. */
+    public static String reasoningEffort = "none";
+    /** Optional user-defined system-prompt fragment appended after built-in rules. */
+    public static String soul = "";
+    /** Inclusive minX,minY,minZ,maxX,maxY,maxZ; null disables the public-chat guard. */
+    public static CoordinateRange publicChatForbiddenCoordinateRange = CoordinateRange.parse(
+        DEFAULT_PUBLIC_CHAT_FORBIDDEN_COORDINATE_RANGE).orElseThrow();
     /** 单次模型 API 请求超时（秒）。 */
     public static int apiTimeoutSeconds = 180;
     public static java.util.Set<String> privateMessageBlacklist = new java.util.HashSet<>();
@@ -94,10 +102,22 @@ public class PluginConfig {
         if (file.exists()) {
             try (FileInputStream in = new FileInputStream(file)) {
                 props.load(in);
+                boolean migrated = migrateProperties(props);
                 apiKey = props.getProperty("api_key", apiKey);
                 apiBaseUrl = props.getProperty("api_base_url", apiBaseUrl);
                 modelName = props.getProperty("model_name", modelName);
-                enableThinking = Boolean.parseBoolean(props.getProperty("enable_thinking", String.valueOf(enableThinking)));
+                reasoningEffort = normalizeReasoningEffort(
+                    props.getProperty("reasoning_effort", reasoningEffort));
+                soul = props.getProperty("soul", soul).trim();
+                String protectedRange = props.getProperty(
+                    "public_chat_forbidden_coordinate_range",
+                    DEFAULT_PUBLIC_CHAT_FORBIDDEN_COORDINATE_RANGE
+                );
+                try {
+                    publicChatForbiddenCoordinateRange = CoordinateRange.parse(protectedRange).orElse(null);
+                } catch (IllegalArgumentException error) {
+                    logger.warn("Invalid public_chat_forbidden_coordinate_range; keeping previous value", error);
+                }
 
                 try {
                     maxMemoryMessages = Integer.parseInt(props.getProperty("max_memory_messages", String.valueOf(maxMemoryMessages)).trim());
@@ -124,7 +144,14 @@ public class PluginConfig {
                     }
                 }
                 
-                logger.info("Configuration loaded from {}", configFileStr);
+                if (migrated) {
+                    try (FileOutputStream out = new FileOutputStream(file)) {
+                        props.store(out, "XinClaw Configuration");
+                    }
+                    logger.info("Configuration migrated with current XinClaw options at {}", configFileStr);
+                } else {
+                    logger.info("Configuration loaded from {}", configFileStr);
+                }
             } catch (IOException e) {
                 logger.error("Failed to load config file", e);
             }
@@ -132,7 +159,12 @@ public class PluginConfig {
             props.setProperty("api_key", apiKey);
             props.setProperty("api_base_url", apiBaseUrl);
             props.setProperty("model_name", modelName);
-            props.setProperty("enable_thinking", String.valueOf(enableThinking));
+            props.setProperty("reasoning_effort", reasoningEffort);
+            props.setProperty("soul", soul);
+            props.setProperty(
+                "public_chat_forbidden_coordinate_range",
+                DEFAULT_PUBLIC_CHAT_FORBIDDEN_COORDINATE_RANGE
+            );
             props.setProperty("api_timeout_seconds", String.valueOf(apiTimeoutSeconds));
             props.setProperty("private_message_blacklist", "back,help");
             props.setProperty("max_memory_messages", String.valueOf(maxMemoryMessages));
@@ -145,5 +177,41 @@ public class PluginConfig {
                 logger.error("Failed to create default config file", e);
             }
         }
+    }
+
+    static String normalizeReasoningEffort(String value) {
+        if (value == null) return "none";
+        return switch (value.trim().toLowerCase(java.util.Locale.ROOT)) {
+            case "none" -> "none";
+            case "low" -> "low";
+            case "medium" -> "medium";
+            case "high" -> "high";
+            default -> "none";
+        };
+    }
+
+    static boolean migrateProperties(Properties properties) {
+        boolean changed = false;
+        if (!properties.containsKey("reasoning_effort")) {
+            String legacyThinking = properties.getProperty("enable_thinking");
+            properties.setProperty(
+                "reasoning_effort",
+                Boolean.parseBoolean(legacyThinking) ? "high" : "none"
+            );
+            changed = true;
+        }
+        if (!properties.containsKey("soul")) {
+            properties.setProperty("soul", "");
+            changed = true;
+        }
+        if (!properties.containsKey("public_chat_forbidden_coordinate_range")) {
+            properties.setProperty(
+                "public_chat_forbidden_coordinate_range",
+                DEFAULT_PUBLIC_CHAT_FORBIDDEN_COORDINATE_RANGE
+            );
+            changed = true;
+        }
+        if (properties.remove("enable_thinking") != null) changed = true;
+        return changed;
     }
 }

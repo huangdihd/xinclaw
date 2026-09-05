@@ -2,15 +2,11 @@ package xin.claw;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import dev.langchain4j.service.SystemMessage;
 import org.junit.jupiter.api.Test;
 
 final class AgentManagerAllowDigPromptTest {
-    private static String systemPrompt() throws Exception {
-        SystemMessage system = AgentManager.BotAgent.class
-            .getMethod("chat", String.class)
-            .getAnnotation(SystemMessage.class);
-        return String.join("\n", system.value());
+    private static String systemPrompt() {
+        return AgentManager.configuredSystemPrompt();
     }
 
     @Test

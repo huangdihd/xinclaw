@@ -9,9 +9,7 @@ import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.agent.tool.ToolSpecifications;
 import java.util.List;
 import java.util.Map;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
-import xin.bbtt.MovementSync;
 
 /**
  * Navigation must be dig-free unless the agent explicitly opts in:
@@ -22,10 +20,6 @@ final class MovementToolsAllowDigTest {
     private static final List<String> NAVIGATION_TOOLS = List.of(
         "pathfindTo", "previewPathTo", "pathfindToBounds", "previewPathToBounds");
 
-    @AfterEach
-    void restoreGlobalPermission() {
-        MovementSync.setAllowDigging(true);
-    }
 
     @Test
     void everyNavigationToolPublishesOptionalBooleanAllowDig() {
@@ -60,19 +54,6 @@ final class MovementToolsAllowDigTest {
             "old always-digs promise must be removed: " + description);
     }
 
-    @Test
-    void omittingAllowDigDisablesDiggingGloballyForTheNavigationRequest() {
-        MovementTools.applyAllowDigPermission(null);
-        assertFalse(MovementSync.isAllowDigging(),
-            "omitting allowDig must switch the planner to no-dig mode");
-
-        MovementTools.applyAllowDigPermission(false);
-        assertFalse(MovementSync.isAllowDigging());
-
-        MovementTools.applyAllowDigPermission(true);
-        assertTrue(MovementSync.isAllowDigging(),
-            "allowDig=true must re-enable digging for this navigation request");
-    }
 
     @Test
     void resolveAllowDigTreatsOnlyExplicitTrueAsEnabled() {

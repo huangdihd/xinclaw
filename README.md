@@ -46,8 +46,12 @@ api_key=sk-xxxx...
 api_base_url=https://api.openai.com/v1
 # 模型名称
 model_name=gpt-4o-mini
-# 开启思考过程（视模型支持情况而定）
-enable_thinking=false
+# 推理强度：none（关闭）、low、medium、high
+reasoning_effort=none
+# 追加到内置系统提示词末尾的自定义人格/行为提示
+soul=你珍惜建筑，不主动破坏玩家作品。
+# 禁止在公屏透露的闭区间：minX,minY,minZ,maxX,maxY,maxZ；仅出现X/Z时按水平投影判断；留空禁用
+public_chat_forbidden_coordinate_range=-30000000,-2048,-30000000,30000000,2048,30000000
 # 发送给模型的记忆窗口条数（<=0 表示不限制，不建议）
 max_memory_messages=150
 # 自主任务循环的检查间隔（秒，最小 5）
@@ -58,12 +62,9 @@ low_health_threshold=10.0
 private_message_blacklist=back,help
 ```
 
-### DeepSeek SSE 与运行轨迹
+### OpenAI-compatible 推理流与运行轨迹
 
-当模型名包含 `deepseek` 时，XinClaw 使用原生 OpenAI-compatible SSE 适配器。若
-`enable_thinking=true`，它会分别处理 `reasoning_content`、可见 `content` 和分片
-`tool_calls`，并在工具续调用中按协议回传 reasoning。若网关偶发返回只有 reasoning、
-没有 content/tool call 的终态，同一请求最多原样重试一次，不会把思维内容伪装成回复。
+`reasoning_effort=none` 使用普通流式模型；设置为 `low`、`medium` 或 `high` 时，XinClaw 使用通用 OpenAI-compatible reasoning SSE 适配器。它会分别处理 `reasoning_content`、可见 `content` 和分片 `tool_calls`，并在工具续调用中按协议回传 reasoning。若网关偶发返回只有 reasoning、没有 content/tool call 的终态，同一请求最多原样重试一次，不会把思维内容伪装成回复。
 
 `AgentManager.subscribeTrace(...)` 可订阅有序的 monotonic runtime trace，包括模型请求、
 reasoning/content 流片段、模型响应、工具参数、完整工具返回、Agent 输入/输出及错误。

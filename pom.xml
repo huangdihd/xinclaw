@@ -31,11 +31,11 @@
             <scope>provided</scope>
         </dependency>
 
-        <!-- MovementSync Dependency (built from ../MovementSync, installed locally) -->
+        <!-- MovementSync from the published GitHub release via JitPack -->
         <dependency>
-            <groupId>xin.bbtt</groupId>
+            <groupId>com.github.huangdihd</groupId>
             <artifactId>MovementSync</artifactId>
-            <version>1.8.0-RELEASE</version>
+            <version>1.9.0-RELEASE</version>
             <scope>provided</scope>
         </dependency>
 

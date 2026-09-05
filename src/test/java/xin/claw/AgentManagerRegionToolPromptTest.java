@@ -3,7 +3,6 @@ package xin.claw;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import dev.langchain4j.service.SystemMessage;
 import dev.langchain4j.agent.tool.Tool;
 import java.lang.reflect.Method;
 import org.junit.jupiter.api.Test;
@@ -12,9 +11,7 @@ import xin.claw.tools.PerceptionTools;
 final class AgentManagerRegionToolPromptTest {
     @Test
     void systemPromptDescribesSemanticToolsWithoutPrescribingAWorkflow() throws Exception {
-        Method chat = AgentManager.BotAgent.class.getMethod("chat", String.class);
-        SystemMessage annotation = chat.getAnnotation(SystemMessage.class);
-        String prompt = String.join("\n", annotation.value());
+        String prompt = AgentManager.configuredSystemPrompt();
 
         assertTrue(prompt.contains("searchLoadedVoxelRegions"));
         assertTrue(prompt.contains("searchVoxelRegion"));

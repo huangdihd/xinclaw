@@ -29,12 +29,12 @@ final class AgentManagerStreamingTest {
     }
 
     @Test
-    void glmCodingPlanThinkingUsesReasoningTraceAdapter() throws Exception {
+    void reasoningEffortUsesGenericReasoningTraceAdapter() throws Exception {
         String originalModel = PluginConfig.modelName;
-        boolean originalThinking = PluginConfig.enableThinking;
+        String originalReasoningEffort = PluginConfig.reasoningEffort;
         try {
-            PluginConfig.modelName = "glm-coding-plan/glm-5.3-flash";
-            PluginConfig.enableThinking = true;
+            PluginConfig.modelName = "reasoning-model";
+            PluginConfig.reasoningEffort = "low";
 
             SingleTerminalStreamingChatLanguageModel model = assertInstanceOf(
                 SingleTerminalStreamingChatLanguageModel.class,
@@ -43,10 +43,32 @@ final class AgentManagerStreamingTest {
             Field delegate = SingleTerminalStreamingChatLanguageModel.class.getDeclaredField("delegate");
             delegate.setAccessible(true);
 
-            assertInstanceOf(DeepSeekThinkingStreamingChatLanguageModel.class, delegate.get(model));
+            Object reasoningModel = assertInstanceOf(
+                OpenAiCompatibleReasoningStreamingChatLanguageModel.class, delegate.get(model));
+            Field effort = OpenAiCompatibleReasoningStreamingChatLanguageModel.class
+                .getDeclaredField("reasoningEffort");
+            effort.setAccessible(true);
+            assertEquals("low", effort.get(reasoningModel));
         } finally {
             PluginConfig.modelName = originalModel;
-            PluginConfig.enableThinking = originalThinking;
+            PluginConfig.reasoningEffort = originalReasoningEffort;
+        }
+    }
+
+    @Test
+    void reasoningEffortNoneUsesStandardStreamingModel() throws Exception {
+        String originalEffort = PluginConfig.reasoningEffort;
+        try {
+            PluginConfig.reasoningEffort = "none";
+            SingleTerminalStreamingChatLanguageModel model = assertInstanceOf(
+                SingleTerminalStreamingChatLanguageModel.class,
+                AgentManager.buildStreamingModel()
+            );
+            Field delegate = SingleTerminalStreamingChatLanguageModel.class.getDeclaredField("delegate");
+            delegate.setAccessible(true);
+            assertInstanceOf(OpenAiStreamingChatModel.class, delegate.get(model));
+        } finally {
+            PluginConfig.reasoningEffort = originalEffort;
         }
     }
 

@@ -90,10 +90,6 @@ public class MovementTools {
         return binding;
     }
 
-    static void applyAllowDigPermission(Boolean allowDig) {
-        MovementSync.setAllowDigging(resolveAllowDig(allowDig));
-    }
-
     @Tool("让机器人行走(walk)到指定的绝对坐标点 x, y, z。这是一个持续性动作，大约每秒可以移动 4.3 格。")
     public String walkTo(
             @P("目标 X 坐标") double x,
@@ -170,14 +166,15 @@ public class MovementTools {
         if (MovementSync.INSTANCE == null || MovementSync.INSTANCE.movementController == null) {
             return "MovementSync 插件尚未就绪，无法移动。";
         }
-        applyAllowDigPermission(allowDig);
+        boolean digAllowed = resolveAllowDig(allowDig);
 
         Vector3d currentPos = MovementSync.INSTANCE.position.get();
         Node start = new Node((int) Math.floor(currentPos.x), (int) Math.floor(currentPos.y), (int) Math.floor(currentPos.z));
         Node goal = new Node((int) Math.floor(x), (int) Math.floor(y), (int) Math.floor(z));
 
         // 预检查路径是否通畅
-        DStarLite pf = new DStarLite(start, goal, MovementSync.INSTANCE.getWorld());
+        DStarLite pf = new DStarLite(start, goal, new DefaultPathfindingContext(
+            MovementSync.INSTANCE.getWorld(), digAllowed));
         List<xin.bbtt.pathfinding.PathStep> path = pf.findPath(2000); 
 
         if (path == null || path.size() <= 1) {
@@ -187,8 +184,7 @@ public class MovementTools {
         // 使用 MovementSync 1.3.3+ 内置的寻路引擎
         MovementTaskBinding binding = installMovementTaskBinding(taskId, x, y, z);
         org.joml.Vector3i targetPos = new org.joml.Vector3i((int) Math.floor(x), (int) Math.floor(y), (int) Math.floor(z));
-        MovementSync.INSTANCE.setActiveGoal(targetPos);
-        MovementSync.INSTANCE.triggerAutoRepath();
+        MovementSync.INSTANCE.startStaticNavigation(targetPos, digAllowed);
 
         return String.format("已启动内置寻路引擎，寻路成功（包含 %d 个节点），开始前往坐标 (%.2f, %.2f, %.2f)。挖掘许可：%s。%s", path.size(), x, y, z, resolveAllowDig(allowDig) ? "允许挖掘挡路方块" : "不挖掘任何方块", binding.implicit() ? "已创建内部续航任务，到达或卡住后系统会再次唤醒你。" : "已绑定任务 ID: " + binding.taskId());
     }
@@ -321,7 +317,6 @@ public class MovementTools {
             return "MovementSync 插件尚未就绪，无法进行区域寻路。";
         }
         boolean digAllowed = resolveAllowDig(allowDig);
-        applyAllowDigPermission(allowDig);
         try {
             Optional<RegionPathPlanner.Result> result = findRegionTarget(min, max_exclusive, digAllowed);
             if (result.isEmpty()) {
@@ -331,8 +326,7 @@ public class MovementTools {
             MovementTaskBinding binding = installMovementTaskBinding(
                 taskId, target.target().x, target.target().y, target.target().z);
             org.joml.Vector3i targetPos = target.target().toVector();
-            MovementSync.INSTANCE.setActiveGoal(targetPos);
-            MovementSync.INSTANCE.triggerAutoRepath();
+            MovementSync.INSTANCE.startStaticNavigation(targetPos, digAllowed);
             return String.format(
                 "已从 bounds 中选择可达站立点 (%d,%d,%d)，预检查路径%d个节点，并启动内置寻路引擎。%s",
                 target.target().x, target.target().y, target.target().z, target.pathLength(),
