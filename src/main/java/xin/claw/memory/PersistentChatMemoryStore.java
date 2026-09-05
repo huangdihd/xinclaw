@@ -38,14 +38,11 @@ import xin.claw.trace.AgentTracePublisher;
 
 public class PersistentChatMemoryStore implements ChatMemoryStore {
     private static final Logger logger = LoggerFactory.getLogger(PersistentChatMemoryStore.class);
-    static final int MAX_TRACKED_TOOL_IDS = 512;
     private final Path filePath;
-    private final java.util.Set<String> completedToolExecutionIds =
-        boundedKeySet();
+    private final java.util.Set<String> previousToolResultIds = new java.util.HashSet<>();
     private final java.util.concurrent.atomic.AtomicLong completedToolExecutionCount =
         new java.util.concurrent.atomic.AtomicLong();
-    private final java.util.Set<String> recordedToolCallIds =
-        boundedKeySet();
+    private final java.util.Set<String> previousToolCallIds = new java.util.HashSet<>();
     private final AgentTracePublisher trace;
 
     public PersistentChatMemoryStore(String pluginDir) {
@@ -56,7 +53,7 @@ public class PersistentChatMemoryStore implements ChatMemoryStore {
         this.filePath = new File(pluginDir + File.separator + "chat-memory.json").toPath();
         this.trace = java.util.Objects.requireNonNull(trace, "trace");
         ensureFileExists();
-        seedRecordedToolExecutions(getMessages("default"));
+        initializeToolEventSnapshots(getMessages("default"));
     }
 
     private void ensureFileExists() {
@@ -183,9 +180,9 @@ public class PersistentChatMemoryStore implements ChatMemoryStore {
     public void deleteMessages(Object memoryId) {
         try {
             Files.write(filePath, "[]".getBytes(StandardCharsets.UTF_8));
-            completedToolExecutionIds.clear();
+            previousToolResultIds.clear();
             completedToolExecutionCount.set(0L);
-            recordedToolCallIds.clear();
+            previousToolCallIds.clear();
         } catch (IOException e) {
             logger.error("Failed to clear messages in store", e);
         }
@@ -196,23 +193,22 @@ public class PersistentChatMemoryStore implements ChatMemoryStore {
     }
 
     int trackedCompletedToolIdCount() {
-        return completedToolExecutionIds.size();
+        return previousToolResultIds.size();
     }
 
     int trackedToolCallIdCount() {
-        return recordedToolCallIds.size();
+        return previousToolCallIds.size();
     }
 
-    private void seedRecordedToolExecutions(List<ChatMessage> messages) {
+    private void initializeToolEventSnapshots(List<ChatMessage> messages) {
         for (ChatMessage message : messages) {
             if (message instanceof AiMessage ai && ai.hasToolExecutionRequests()) {
                 for (ToolExecutionRequest request : ai.toolExecutionRequests()) {
-                    recordedToolCallIds.add(toolCallKey(request));
+                    previousToolCallIds.add(toolCallKey(request));
                 }
             }
             if (message instanceof ToolExecutionResultMessage result) {
-                String id = result.id();
-                if (id != null && !id.isBlank() && completedToolExecutionIds.add(id)) {
+                if (previousToolResultIds.add(toolResultKey(result))) {
                     completedToolExecutionCount.incrementAndGet();
                 }
             }
@@ -220,10 +216,28 @@ public class PersistentChatMemoryStore implements ChatMemoryStore {
     }
 
     private void recordNewToolEvents(List<ChatMessage> messages) {
+        java.util.Set<String> currentToolCallIds = new java.util.HashSet<>();
+        java.util.Set<String> currentToolResultIds = new java.util.HashSet<>();
         for (ChatMessage message : messages) {
             if (message instanceof AiMessage ai && ai.hasToolExecutionRequests()) {
                 for (ToolExecutionRequest request : ai.toolExecutionRequests()) {
-                    if (!recordedToolCallIds.add(toolCallKey(request))) continue;
+                    currentToolCallIds.add(toolCallKey(request));
+                }
+            }
+            if (message instanceof ToolExecutionResultMessage result) {
+                currentToolResultIds.add(toolResultKey(result));
+            }
+        }
+
+        java.util.Set<String> newToolCallIds = new java.util.HashSet<>(currentToolCallIds);
+        newToolCallIds.removeAll(previousToolCallIds);
+        java.util.Set<String> newToolResultIds = new java.util.HashSet<>(currentToolResultIds);
+        newToolResultIds.removeAll(previousToolResultIds);
+
+        for (ChatMessage message : messages) {
+            if (message instanceof AiMessage ai && ai.hasToolExecutionRequests()) {
+                for (ToolExecutionRequest request : ai.toolExecutionRequests()) {
+                    if (!newToolCallIds.remove(toolCallKey(request))) continue;
                     com.google.gson.JsonObject payload = new com.google.gson.JsonObject();
                     payload.addProperty("id", request.id());
                     payload.addProperty("tool", request.name());
@@ -232,9 +246,7 @@ public class PersistentChatMemoryStore implements ChatMemoryStore {
                 }
             }
             if (message instanceof ToolExecutionResultMessage result) {
-                String key = result.id() != null && !result.id().isBlank()
-                    ? result.id() : result.toolName() + "\u0000" + result.text();
-                if (!completedToolExecutionIds.add(key)) continue;
+                if (!newToolResultIds.remove(toolResultKey(result))) continue;
                 completedToolExecutionCount.incrementAndGet();
                 com.google.gson.JsonObject payload = new com.google.gson.JsonObject();
                 payload.addProperty("id", result.id());
@@ -243,6 +255,11 @@ public class PersistentChatMemoryStore implements ChatMemoryStore {
                 trace.emit("tool_result", payload);
             }
         }
+
+        previousToolCallIds.clear();
+        previousToolCallIds.addAll(currentToolCallIds);
+        previousToolResultIds.clear();
+        previousToolResultIds.addAll(currentToolResultIds);
     }
 
     private static String toolCallKey(ToolExecutionRequest request) {
@@ -250,15 +267,8 @@ public class PersistentChatMemoryStore implements ChatMemoryStore {
         return request.name() + "\u0000" + request.arguments();
     }
 
-    private static java.util.Set<String> boundedKeySet() {
-        java.util.Map<String, Boolean> map = java.util.Collections.synchronizedMap(
-            new java.util.LinkedHashMap<>(MAX_TRACKED_TOOL_IDS + 1, 0.75f, true) {
-                @Override
-                protected boolean removeEldestEntry(java.util.Map.Entry<String, Boolean> eldest) {
-                    return size() > MAX_TRACKED_TOOL_IDS;
-                }
-            }
-        );
-        return java.util.Collections.newSetFromMap(map);
+    private static String toolResultKey(ToolExecutionResultMessage result) {
+        if (result.id() != null && !result.id().isBlank()) return result.id();
+        return result.toolName() + "\u0000" + result.text();
     }
 }
