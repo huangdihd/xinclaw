@@ -31,7 +31,7 @@
    mvn clean package
    ```
 2. **部署**：
-   将 `target/XinClaw-1.0-SNAPSHOT.jar` 放入 Xinbot 的 `plugins` 文件夹。
+   将 `target/XinClaw-1.0.0.jar`（或从 [Releases](https://github.com/huangdihd/xinclaw/releases) 下载的同名文件）放入 Xinbot 的 `plugins` 文件夹。需要 Xinbot `2.0.1-RELEASE` 和 MovementSync `1.9.0-RELEASE`；这两个依赖不包含在插件 JAR 内。
 3. **初始化配置**：
    首次启动机器人后，插件会自动在 `plugins/XinClaw/` 目录下生成 `config.properties`（旧版本的 `plugins/XinAgent/` 数据目录会被自动迁移）。
 4. **填入 API Key**：
